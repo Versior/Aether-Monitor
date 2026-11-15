@@ -55,6 +55,8 @@ Screenshots and previews use fictional demo servers. The current demo includes t
 
 Automatic route tags list the networks observed on the tested outbound path. A `*` marks a hop without ASN data; not observing CN2 does not rule it out. These results do not certify a provider's route tier.
 
+The updated companion detector also recognizes CTGNET, CUG, CMIN2 and common international networks. ASN evidence and local IP-prefix hints are shown separately, with protocol and attempt counts. Partial paths are marked; international-only observations use an explicit transit label and do not certify a China backbone.
+
 ## Visitor privacy
 
 On page load, the theme reads the host's Cloudflare trace and sends the visitor's exit IP to [IPQuery](https://ipquery.io/) to obtain network metadata and risk flags. Results stay in page memory; addresses are masked by default. Add `https://api.ipquery.io` to the host's CSP API allowlist.
