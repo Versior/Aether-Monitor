@@ -5,7 +5,7 @@ import { http } from '../../src/frontend/utils/http.js'
 import { initConfig, getApiBases } from '../../src/frontend/utils/config.js'
 import { ADMIN_ENTRY_URL } from '../../src/frontend/router/adminEntryUrl.js'
 import { DEFAULT_SITE_TITLE } from '../../src/frontend/utils/constants.js'
-import { normalizeNode, preferences, defaultPreferences, regionName, flag, routes, hasIp, usage, percent, capacity, bytes, speed, trafficBytes, trafficPercent, trafficNames, quota, price, expiry, daysLeft, uptime, dateTime, activeProbes, probeValue, latencyClass, issues, timestamp, number } from './data.js'
+import { normalizeNode, preferences, regionName, flag, routes, hasIp, usage, percent, capacity, bytes, speed, trafficBytes, trafficPercent, trafficNames, quota, price, expiry, daysLeft, uptime, dateTime, activeProbes, probeValue, latencyClass, issues, timestamp, number } from './data.js'
 import Globe from './Globe.vue'
 import NodeCard from './NodeCard.vue'
 import MetricChart from './MetricChart.vue'
@@ -25,7 +25,8 @@ const loading = ref(true)
 const error = ref('')
 const clock = ref(Date.now())
 const snapshotAt = ref(null)
-const prefs = reactive({ ...defaultPreferences })
+const savedPreferences = window.__AETHER_PREFERENCES__
+const prefs = reactive(preferences(savedPreferences))
 const settingsOpen = ref(false)
 const settingsDialog = ref(null)
 const projectBackground = ref('none')
@@ -226,7 +227,8 @@ function dialogKey(event) {
 }
 const media = { light: window.matchMedia('(prefers-color-scheme: light)'), motion: window.matchMedia('(prefers-reduced-motion: reduce)'), background: window.matchMedia('(max-width: 767px)') }
 function mediaChanged() { systemLight.value = media.light.matches; reducedMotion.value = media.motion.matches }
-watch(prefs, () => localStorage.setItem('orbit-preferences', JSON.stringify(prefs)))
+watch(light, value => { document.documentElement.dataset.appearance = value ? 'light' : 'dark' }, { immediate: true })
+watch(prefs, () => { Object.assign(savedPreferences, prefs); localStorage.setItem('orbit-preferences', JSON.stringify(prefs)) })
 watch(historyHours, loadHistory)
 watch(maxHistoryHours, hours => { if (historyHours.value > hours) historyHours.value = hours })
 watch(needsVerification, needed => { if (needed) { runtime.socket?.close(); pending.clear(); detailId.value = ''; nodes.value = []; sysConfig.value = {}; snapshotAt.value = null } })
@@ -257,12 +259,7 @@ onMounted(async () => {
     await initConfig()
     config.value = await request('/api/config')
     document.title = siteTitle.value
-    restorePreferences()
-    const saved = localStorage.getItem('orbit-preferences')
-    if (saved) {
-      try { Object.assign(prefs, preferences({ ...prefs, ...JSON.parse(saved) })) }
-      catch { restorePreferences() }
-    }
+    Object.assign(prefs, preferences({ appearance: config.value.preferred_theme, ...(config.value.theme_options?.aether ?? config.value.theme_options?.orbit), ...savedPreferences }))
     if (!needsVerification.value) {
       await loadNodes()
       connect()
@@ -286,8 +283,10 @@ onUnmounted(() => {
 
 <template>
   <div class="orbit-app" :class="{ light }" :style="themeStyle">
-    <div v-if="prefs.background === 'project' && projectBackground !== 'none'" class="project-backdrop" :style="{ backgroundImage: projectBackground }" aria-hidden="true" />
-    <div class="ambient-glow" />
+    <template v-if="prefs.background === 'project' && projectBackground !== 'none'">
+      <div class="project-backdrop" :style="{ backgroundImage: projectBackground }" aria-hidden="true" />
+      <div class="ambient-glow" />
+    </template>
     <div class="page-shell" :inert="Boolean(detailNode) || settingsOpen" :aria-hidden="Boolean(detailNode) || settingsOpen">
       <header class="topbar">
         <a href="#/" class="brand" aria-label="监控首页"><img :src="siteIcon" class="brand-icon" alt="" /><strong class="project-brand" :title="siteTitle">{{ siteTitle }}</strong></a>
@@ -343,7 +342,10 @@ onUnmounted(() => {
       <div class="settings-heading"><div><span>AETHER</span><h2 id="theme-settings-title">主题设置</h2></div><button class="icon-button" aria-label="关闭主题设置" @click="closeSettings"><UiIcon name="close" /></button></div>
       <p class="settings-note">调整会即时预览，并保存在当前浏览器。</p>
       <div class="settings-section"><h3>背景与质感</h3>
-        <label class="setting-row"><span>页面背景<small>{{ projectBackground === 'none' ? '项目未设置背景，将使用默认底色' : '跟随项目的桌面与手机背景' }}</small></span><select v-model="prefs.background" aria-label="页面背景"><option value="project">项目背景</option><option value="default">默认背景</option></select></label>
+        <div class="background-options" role="group" aria-label="页面背景">
+          <button :class="{ selected: prefs.background === 'project' }" :aria-pressed="prefs.background === 'project'" @click="prefs.background = 'project'"><span class="background-preview" :style="{ backgroundImage: projectBackground }" aria-hidden="true" /><strong>项目背景</strong><small>{{ projectBackground === 'none' ? '后台未设置背景，使用纯色' : '跟随项目的桌面与手机背景' }}</small></button>
+          <button :class="{ selected: prefs.background === 'default' }" :aria-pressed="prefs.background === 'default'" @click="prefs.background = 'default'"><span class="background-preview solid" aria-hidden="true" /><strong>纯色背景</strong><small>随深浅色切换，关闭背景图片</small></button>
+        </div>
         <label class="setting-range"><span>卡片不透明度<output>{{ prefs.cardOpacity }}%</output></span><input v-model.number="prefs.cardOpacity" type="range" min="40" max="100" step="5" aria-label="卡片不透明度"><small>数值越低，背景越明显；文字保持清晰。</small></label>
         <label class="setting-range"><span>毛玻璃模糊<output>{{ prefs.panelBlur }} px</output></span><input v-model.number="prefs.panelBlur" type="range" min="0" max="20" step="1" aria-label="毛玻璃模糊"><small>在半透明卡片下生效。</small></label>
       </div>

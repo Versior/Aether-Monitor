@@ -1,13 +1,13 @@
 <script setup>
 defineProps({ report: { type: Object, default: null }, now: { type: Number, required: true } })
 const names = { ct: '电信', cu: '联通', cm: '移动' }
-const states = { detected: '已识别', partial: '路径未完成', unknown: '未识别', failed: '检测失败', disabled: '已关闭' }
+const states = { detected: '观测到的网络', partial: '路径未完成', unknown: '未识别', failed: '检测失败', disabled: '已关闭' }
 </script>
 
 <template>
   <details v-if="report" class="route-evidence">
     <summary><span>自动线路检测<small>{{ report.routes.length }} 个方向 · {{ report.expires_at <= now ? '结果已过期' : '查看 ASN 证据' }}</small></span><time>{{ new Date(report.checked_at).toLocaleString('zh-CN', { hour12: false }) }}</time></summary>
-    <p>VPS 到配置目标的单向路径；不认证 GIA / GT，也不代表相反方向。</p>
+    <p>VPS 到配置目标的单向路径；标签列出本次观测到的网络。* 表示该跳未返回 ASN，未出现某个网络不代表没有经过。结果不认证 GIA / GT，也不代表相反方向。</p>
     <div v-for="route in report.routes" :key="`${route.carrier}-${route.family}`" class="route-evidence-row">
       <span>{{ names[route.carrier] }} · IPv{{ route.family }}</span>
       <strong :class="{ verified: report.expires_at > now && route.status === 'detected' }">{{ route.networks.join(' / ') || '—' }}<small>{{ report.expires_at <= now ? '结果已过期' : states[route.status] }}</small></strong>

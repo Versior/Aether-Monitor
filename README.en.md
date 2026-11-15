@@ -35,10 +35,10 @@ Download `aether-theme.zip` and `SHA256SUMS.txt` from [Releases](https://github.
 - Textured WebGL globe with drag rotation, inertia, flags, colored markers and expanding rings.
 - Country-level server locations and a separate green visitor-location marker.
 - Animated flows from server countries toward the visitor marker, with a switch to restore server-to-server arcs.
-- Theme settings for project/default backgrounds, card opacity, blur, appearance and globe motion.
+- Theme settings with visible project/solid background choices, card opacity, blur, appearance and globe motion. Saved appearance is restored before the main script loads.
 - Live WebSocket metrics, resource capacity, network rates, monthly traffic and billing information.
 - Card, table and network-matrix views with grouping, filters and sorting.
-- Manual route tags take priority; compatible Workers can provide automatic results with ASN evidence. Enabling detection requires the [Worker update and VPS detector](https://github.com/Versior/CF-Server-Monitor/blob/f99bbf9/docs/route-detection.md).
+- Manual route tags take priority; compatible Workers can provide automatic results with ASN evidence. Enabling detection requires the [Worker update and VPS detector](https://github.com/Versior/CF-Server-Monitor/blob/main/docs/route-detection.md).
 - Server overview, network, resources and asset details; historical readings support pointer, touch and keyboard input.
 - Blurred offline cards with a clear status and last-sample time.
 - Responsive layouts and independently tuned dark/light colors.
@@ -52,6 +52,8 @@ Download `aether-theme.zip` and `SHA256SUMS.txt` from [Releases](https://github.
 ![Network matrix](docs/images/network.webp)
 
 Screenshots and previews use fictional demo servers. The current demo includes ten servers covering China and both US coasts. Globe arcs are illustrative, not measured traffic links. Uptime comes from `boot_time` and is not an availability percentage. Expiry notification delivery remains the host project's responsibility.
+
+Automatic route tags list the networks observed on the tested outbound path. A `*` marks a hop without ASN data; not observing CN2 does not rule it out. These results do not certify a provider's route tier.
 
 ## Visitor privacy
 
