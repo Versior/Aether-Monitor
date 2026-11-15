@@ -67,7 +67,7 @@ npm ci
 npm run dev
 ```
 
-Open http://127.0.0.1:5175/. The default local demo includes eight fictional servers, historical samples and simulated updates every ten seconds. It requires no backend deployment or secrets.
+Open the [local preview](http://127.0.0.1:5175/). The default local demo includes eight fictional servers, historical samples and simulated updates every ten seconds. It requires no backend deployment or secrets.
 
 ```bash
 npm test
