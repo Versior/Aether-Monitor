@@ -45,13 +45,15 @@
 | `globe` | `true`、`false` | `true` |
 | `motion` | `true`、`false` | `true` |
 | `visitorFlow` | `true`、`false`；节点向访客国家汇聚 | `true` |
-| `background` | `project`、`default` | `project` |
+| `background` | `project`（项目背景）、`default`（纯色背景） | `project` |
 | `cardOpacity` | 40–100；卡片背景不透明度百分比 | 100 |
 | `panelBlur` | 0–20；半透明卡片背景模糊像素 | 12 |
 
-页头的“主题设置”可即时切换项目／默认背景、透明度、模糊、配色、卡片信息和地球动效。项目背景兼容宿主桌面背景及手机 `body::after` 背景。文字保持不透明。
+页头的“主题设置”提供项目背景与纯色背景两个可见选项，并可调整透明度、模糊、配色、卡片信息和地球动效。项目背景兼容宿主桌面背景及手机 `body::after` 背景；纯色背景关闭图片与环境光效果，底色跟随深浅色。文字保持不透明。
 
 浏览器保存的选择优先于站点默认值。沿用 `orbit-preferences` 存储键，保留已有用户的选择；旧 `theme_options.orbit` 配置仍可读取。“恢复站点默认”会清除个人偏好。主题只读取服务端配置，个人设置不写管理后台。
+
+HTML 在主脚本加载前恢复保存的配色与首屏底色，页面组件在首次渲染时使用同一份个人偏好，无需等待配置接口。跟随系统模式继续响应系统配色变化。
 
 浏览器启用“减少动态效果”时暂停自动动效。WebGL 不可用、纹理加载失败或上下文丢失时显示明确提示。
 
@@ -63,7 +65,7 @@
 
 ## 网站标识与线路标签
 
-页头显示后台设置的 `site_title`，图标使用宿主注入 HTML 的 favicon。未设置自定义图标时使用 CF-Server-Monitor 项目的默认图标。
+页头显示后台设置的 `site_title`，图标使用宿主注入 HTML 的 favicon。未设置自定义图标时使用 CF-Server-Monitor 项目的透明默认图标，标签页和页头使用同一素材。
 
 线路来自后台节点的「标签」字段，沿用宿主的逗号分隔规则，例如 `CN2 GIA,CMI`。旧的 `线路-CN2 GIA` 写法也会显示为 `CN2 GIA`。卡片、列表、详情和线路筛选使用同一组标签，自动去除首尾空白及重复项。
 
@@ -100,4 +102,6 @@ assets/
 
 ## 自动线路检测接口
 
-配套 Worker 支持 `route_report` 时，主题在没有手动标签时展示已完成且未过期的自动线路结果，网络详情可展开 ASN 证据。需要在 VPS 安装检测脚本并升级 Worker 数据库，步骤见 [CF-Server-Monitor 自动线路检测](https://github.com/Versior/CF-Server-Monitor/blob/f99bbf9/docs/route-detection.md)。普通宿主没有该字段时继续显示后台标签。检测只表示到配置目标的单向路径，不认证 GIA/GT。
+配套 Worker 支持 `route_report` 时，主题在没有手动标签时展示已完成且未过期的自动线路结果，网络详情可展开 ASN 证据。需要在 VPS 安装检测脚本并升级 Worker 数据库，步骤见 [CF-Server-Monitor 自动线路检测](https://github.com/Versior/CF-Server-Monitor/blob/main/docs/route-detection.md)。普通宿主没有该字段时继续显示后台标签。检测只表示到配置目标的单向路径，不认证 GIA/GT。
+
+`163` 表示本次观测到 AS4134，`CN2` 表示本次观测到 AS4809。`*` 表示该跳未返回 ASN；有缺失跳时，没有观测到 CN2 不能证明整条路径没有经过 CN2。进一步确认需要服务器上的完整路由输出，不应根据节点名称覆盖自动结果。

@@ -6,14 +6,14 @@ import { compile, computed, createSSRApp, nextTick, reactive, ref, watch } from 
 import { renderToString } from 'vue/server-renderer'
 import * as data from './data.js'
 
-function app() {
+function app(savedPreferences = {}, systemLight = false) {
   const requests = []
   const storage = new Map()
   const sandbox = vm.createContext({
     ...data, computed, nextTick, reactive, ref, watch,
     onMounted() {}, onUnmounted() {},
-    window: { matchMedia: () => ({ matches: false }), location: { hash: '#/' } },
-    document: { title: '测试监控站', querySelector: () => ({ href: 'https://example.invalid/site-icon.svg' }), body: { style: {} } }, localStorage: { setItem: (key, value) => storage.set(key, value) },
+    window: { __AETHER_PREFERENCES__: savedPreferences, matchMedia: () => ({ matches: systemLight }), location: { hash: '#/' } },
+    document: { title: '测试监控站', querySelector: () => ({ href: 'https://example.invalid/site-icon.svg' }), documentElement: { dataset: {} }, body: { style: {} } }, localStorage: { setItem: (key, value) => storage.set(key, value) },
     isServerOnline: () => true, DEFAULT_SITE_TITLE: 'Test',
     http: { get: path => new Promise(resolve => requests.push({ path, resolve })) },
   })
@@ -22,6 +22,13 @@ function app() {
   vm.runInContext('nodes.value = [{ id: "a", name: "A" }]; detailId.value = "a";', sandbox)
   return { requests, storage, run: code => vm.runInContext(code, sandbox) }
 }
+
+test('首次渲染使用已保存的深色和纯色背景，无需等待站点配置', () => {
+  const harness = app({ appearance: 'dark', background: 'default', cardOpacity: 65 }, true)
+  assert.equal(harness.run('light.value'), false)
+  assert.equal(harness.run('prefs.background'), 'default')
+  assert.equal(harness.run('prefs.cardOpacity'), 65)
+})
 
 test('个性化选项即时保存，恢复站点默认同时重置透明度、背景与动效', async () => {
   const harness = app()

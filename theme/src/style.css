@@ -320,6 +320,12 @@ h3 { margin: 0 0 5px; font-size: 13px; font-weight: 580; letter-spacing: .1px; }
 .settings-note { margin: 10px 0 18px; font-size: 11px; line-height: 1.7; color: var(--muted); }
 .settings-section + .settings-section { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
 .settings-section h3 { color: var(--secondary); font-size: 11px; margin: 0 0 12px; }
+.background-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.background-options button { display: grid; grid-template-columns: 36px minmax(0, 1fr); column-gap: 10px; row-gap: 4px; align-items: center; padding: 12px; text-align: left; color: var(--secondary); border: 1px solid var(--border); border-radius: 10px; background: var(--surface-hover); }
+.background-options button.selected { border-color: var(--blue); background: color-mix(in srgb, var(--blue) 8%, var(--surface)); }
+.background-options strong { font-size: 12px; color: var(--text); font-weight: 550; }
+.background-options small { grid-column: 1 / -1; font-size: 10px; line-height: 1.5; color: var(--muted); }
+.background-preview { width: 36px; height: 28px; border-radius: 5px; background-color: var(--bg); background-position: center; background-size: cover; border: 1px solid var(--border); }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 12px; font-size: 12px; }
 .setting-row > span { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .setting-row small, .setting-range small { color: var(--muted); font-size: 10px; line-height: 1.6; }
