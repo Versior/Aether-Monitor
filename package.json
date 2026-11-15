@@ -1,0 +1,26 @@
+{
+  "name": "aether-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aether · 以太 — a globe-inspired CF-Server-Monitor theme",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite --config theme/vite.config.js",
+    "build": "vite build --config theme/vite.config.js",
+    "preview": "vite preview --config theme/vite.config.js",
+    "test": "node --test theme/src/*.test.js",
+    "package": "npm run build && node scripts/package.mjs"
+  },
+  "dependencies": {
+    "vue": "3.5.45"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "6.0.8",
+    "vite": "6.4.6",
+    "ws": "8.21.0"
+  }
+}
