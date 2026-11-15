@@ -1,10 +1,11 @@
 import { formatBillingPrice, normalizePrice, normalizeCurrency, detectCurrencySymbol, detectBillingCycle, getBillingCycleOption } from '../../src/frontend/utils/server.js'
 import { getTrafficUsageBytes } from '../../src/utils/traffic.js'
 import { getApiBases } from '../../src/frontend/utils/config.js'
+import { PING } from '../../src/frontend/utils/constants.js'
 
 export const probeKeys = ['ct', 'cu', 'cm', 'bd', 'node_1', 'node_2', 'node_3', 'node_4']
 export const trafficNames = { total: '双向', dl: '下行', ul: '上行', max: '较大方向' }
-export const defaultPreferences = { layout: 'compact', view: 'card', appearance: 'auto', globe: true, motion: true }
+export const defaultPreferences = { layout: 'compact', view: 'card', appearance: 'auto', globe: true, motion: true, visitorFlow: true, background: 'project', cardOpacity: 100, panelBlur: 12 }
 const numericFields = ['cpu', 'cpu_cores', 'ram_used', 'ram_total', 'disk_used', 'disk_total', 'swap_used', 'swap_total', 'net_in_speed', 'net_out_speed', 'net_rx', 'net_tx', 'net_rx_monthly', 'net_tx_monthly', 'processes', 'tcp_conn', 'udp_conn', 'traffic_limit', ...probeKeys.flatMap(key => [`ping_${key}`, `loss_${key}`])]
 const regionLabels = new Intl.DisplayNames(['zh-CN'], { type: 'region' })
 const areaByRegion = new Map([
@@ -16,9 +17,15 @@ const areaByRegion = new Map([
   ['南极', 'AQ'],
 ].flatMap(([area, codes]) => codes.split(' ').map(code => [code, area])))
 export const number = value => value === null || value === undefined || value === '' || value === false || value === 'false' || !Number.isFinite(Number(value)) ? null : Number(value)
+export function normalizeRegion(value = '') {
+  const code = String(value || '').trim().toUpperCase()
+  if (['CHN', 'CHINA', '中国', '中华人民共和国'].includes(code)) return 'CN'
+  return /^[A-Z]{2}$/.test(code) ? code : ''
+}
 
 export function normalizeNode(raw) {
   const node = { ...raw }
+  if ('region' in raw) node.region = normalizeRegion(raw.region)
   for (const key of numericFields) {
     if (!(key in raw)) continue
     node[key] = raw[key] === false || raw[key] === 'false' ? false : number(raw[key])
@@ -40,6 +47,10 @@ export function preferences(raw = {}) {
     appearance: ['auto', 'dark', 'light'].includes(raw.appearance) ? raw.appearance : 'auto',
     globe: typeof raw.globe === 'boolean' ? raw.globe : true,
     motion: typeof raw.motion === 'boolean' ? raw.motion : true,
+    visitorFlow: typeof raw.visitorFlow === 'boolean' ? raw.visitorFlow : true,
+    background: raw.background === 'default' ? 'default' : 'project',
+    cardOpacity: Number.isFinite(raw.cardOpacity) ? Math.min(100, Math.max(40, raw.cardOpacity)) : 100,
+    panelBlur: Number.isFinite(raw.panelBlur) ? Math.min(20, Math.max(0, raw.panelBlur)) : 12,
   }
 }
 export function regionName(code) {
@@ -47,11 +58,21 @@ export function regionName(code) {
   return regionLabels.of(code)
 }
 export function nodeArea(node) {
-  const coast = node.region === 'US' ? (node.server_group || '').match(/美西|美东/)?.[0] : null
-  return coast || areaByRegion.get(node.region) || '未知地区'
+  if (node.region !== 'US') return areaByRegion.get(node.region) || '未知地区'
+  const location = `${node.server_group || ''} ${node.tags || ''} ${node.name || ''}`
+  const coast = location.match(/美西|美东/)?.[0]
+  if (coast) return coast
+  if (/水牛城|\bbuffalo\b/i.test(location)) return '美东'
+  if (/圣何塞|圣荷西|圣何西|洛杉矶|\bsan[\s-]+jose\b|\blos[\s-]+angeles\b/i.test(location)) return '美西'
+  return '北美'
 }
 export const flag = code => /^[A-Z]{2}$/.test(code || '') && !['XX', 'ZZ'].includes(code) ? new URL(`/flags/${code.toLowerCase()}.svg`, getApiBases()[0]).href : null
-export const routes = node => (node.tags || '').split(',').filter(tag => tag.startsWith('线路-')).map(tag => tag.slice(3))
+export function routes(node, now = Date.now()) {
+  const manual = [...new Set((node.tags || '').split(',').map(tag => tag.trim().replace(/^线路-\s*/, '')).filter(Boolean))]
+  if (manual.length) return manual
+  if (!node.route_report || node.route_report.expires_at <= now) return []
+  return [...new Set(node.route_report.routes.filter(route => route.status === 'detected').map(route => `${{ ct: '电信', cu: '联通', cm: '移动' }[route.carrier]} ${route.networks.join(' / ')}`))]
+}
 export const hasIp = (node, version) => node[`ip_v${version}`] === '1'
 export const usage = (used, total) => used === null || used === undefined || !(total > 0) ? null : Math.round(used / total * 100)
 export const percent = value => value === null || value === undefined ? '—' : `${Math.round(value)}%`
@@ -105,6 +126,7 @@ export function probeValue(node, key, field, online) {
   if (value === null || value === undefined) return '未上报'
   return `${field === 'ping' ? Number(value.toFixed(1)) : value}${field === 'ping' ? ' ms' : '%'}`
 }
+export const latencyClass = (value, online = true) => !online || typeof value !== 'number' || value < 0 ? '' : value < PING.WARNING_THRESHOLD ? 'latency-good' : value < PING.CRITICAL_THRESHOLD ? 'latency-warning' : 'latency-high'
 export function activeProbes(nodes, config) {
   return probeKeys.filter(key => ['ct', 'cu', 'cm'].includes(key) || nodes.some(node => node[`ping_${key}`] > 0 || node[['ct', 'cu', 'cm', 'bd'].includes(key) ? `custom_${key}` : key])).map(key => ({ key, name: config[['ct', 'cu', 'cm', 'bd'].includes(key) ? `custom_${key}_name` : `${key}_name`] || key }))
 }

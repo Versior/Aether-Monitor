@@ -34,8 +34,11 @@ Download `aether-theme.zip` and `SHA256SUMS.txt` from [Releases](https://github.
 
 - Textured WebGL globe with drag rotation, inertia, flags, colored markers and expanding rings.
 - Country-level server locations and a separate green visitor-location marker.
+- Animated flows from server countries toward the visitor marker, with a switch to restore server-to-server arcs.
+- Theme settings for project/default backgrounds, card opacity, blur, appearance and globe motion.
 - Live WebSocket metrics, resource capacity, network rates, monthly traffic and billing information.
 - Card, table and network-matrix views with grouping, filters and sorting.
+- Manual route tags take priority; compatible Workers can provide automatic results with ASN evidence. Enabling detection requires the [Worker update and VPS detector](https://github.com/Versior/CF-Server-Monitor/blob/f99bbf9/docs/route-detection.md).
 - Server overview, network, resources and asset details; historical readings support pointer, touch and keyboard input.
 - Blurred offline cards with a clear status and last-sample time.
 - Responsive layouts and independently tuned dark/light colors.
@@ -48,7 +51,7 @@ Download `aether-theme.zip` and `SHA256SUMS.txt` from [Releases](https://github.
 
 ![Network matrix](docs/images/network.webp)
 
-All screenshots use eight fictional demo servers. Globe arcs are illustrative, not measured traffic links. Uptime comes from `boot_time` and is not an availability percentage. Expiry notification delivery remains the host project's responsibility.
+Screenshots and previews use fictional demo servers. The current demo includes ten servers covering China and both US coasts. Globe arcs are illustrative, not measured traffic links. Uptime comes from `boot_time` and is not an availability percentage. Expiry notification delivery remains the host project's responsibility.
 
 ## Visitor privacy
 
@@ -67,7 +70,7 @@ npm ci
 npm run dev
 ```
 
-Open the [local preview](http://127.0.0.1:5175/). The default local demo includes eight fictional servers, historical samples and simulated updates every ten seconds. It requires no backend deployment or secrets.
+Open the [local preview](http://127.0.0.1:5175/). The default local demo includes ten fictional servers, historical samples and simulated updates every ten seconds. It requires no backend deployment or secrets.
 
 ```bash
 npm test

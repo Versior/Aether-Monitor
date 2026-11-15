@@ -2,24 +2,55 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { compile, computed, createSSRApp, nextTick, reactive, ref, watch } from 'vue'
+import { renderToString } from 'vue/server-renderer'
 import * as data from './data.js'
 
 function app() {
   const requests = []
+  const storage = new Map()
   const sandbox = vm.createContext({
     ...data, computed, nextTick, reactive, ref, watch,
     onMounted() {}, onUnmounted() {},
     window: { matchMedia: () => ({ matches: false }), location: { hash: '#/' } },
-    document: { body: { style: {} } }, localStorage: { setItem() {} },
+    document: { title: '测试监控站', querySelector: () => ({ href: 'https://example.invalid/site-icon.svg' }), body: { style: {} } }, localStorage: { setItem: (key, value) => storage.set(key, value) },
     isServerOnline: () => true, DEFAULT_SITE_TITLE: 'Test',
     http: { get: path => new Promise(resolve => requests.push({ path, resolve })) },
   })
   const script = readFileSync(new URL('./App.vue', import.meta.url), 'utf8').match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
   vm.runInContext(script, sandbox)
   vm.runInContext('nodes.value = [{ id: "a", name: "A" }]; detailId.value = "a";', sandbox)
-  return { requests, run: code => vm.runInContext(code, sandbox) }
+  return { requests, storage, run: code => vm.runInContext(code, sandbox) }
 }
+
+test('个性化选项即时保存，恢复站点默认同时重置透明度、背景与动效', async () => {
+  const harness = app()
+  harness.run('config.value = { preferred_theme: "light", theme_options: { aether: { cardOpacity: 85, background: "default", motion: false } } }; prefs.cardOpacity = 55; prefs.background = "project"')
+  await nextTick()
+  assert.equal(JSON.parse(harness.storage.get('orbit-preferences')).cardOpacity, 55)
+  assert.equal(harness.run('themeStyle.value["--panel-opacity"]'), '55%')
+  harness.run('restorePreferences()')
+  await nextTick()
+  const saved = JSON.parse(harness.storage.get('orbit-preferences'))
+  assert.equal(saved.cardOpacity, 85)
+  assert.equal(saved.background, 'default')
+  assert.equal(saved.motion, false)
+  assert.equal(saved.appearance, 'light')
+})
+
+test('页头显示站点标题与宿主图标，配置标题更新后同步显示', async () => {
+  const harness = app()
+  const source = readFileSync(new URL('./App.vue', import.meta.url), 'utf8')
+  const render = compile(source.match(/<a href="#\/" class="brand"[\s\S]*?<\/a>/)[0])
+  const component = () => createSSRApp({ setup: () => harness.run('({ siteTitle, siteIcon })'), render })
+  const initial = await renderToString(component())
+  assert.match(initial, /测试监控站/)
+  assert.match(initial, /src="https:\/\/example.invalid\/site-icon.svg"/)
+  harness.run('config.value = { site_title: "星港监控" }')
+  const updated = await renderToString(component())
+  assert.match(updated, /星港监控/)
+  assert.doesNotMatch(updated, /CF-Server-Monitor/)
+})
 
 test('同一节点连续刷新历史时，只提交最新请求，旧响应不覆盖数据或加载状态', async () => {
   const harness = app()

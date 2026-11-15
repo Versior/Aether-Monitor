@@ -25,6 +25,12 @@ test('风险分和阴性标记保留零值，缺数据不会当作纯净', () =>
 test('Cloudflare trace 不把值中的等号或空行解析成额外字段', () => {
   assert.deepEqual(parseTrace('ip=203.0.113.71\nloc=JP\nvalue=a=b\n'), { ip: '203.0.113.71', loc: 'JP', value: 'a=b' })
 })
+test('中国访客地区码和国家名称能产生 CN 定位，CRLF 不进入地区码', () => {
+  assert.equal(parseTrace('ip=203.0.113.71\r\nloc=cn\r\n').loc, 'CN')
+  for (const location of [{ country_code: 'cn', country: 'China' }, { country_code: 'CHN' }, { country: 'China' }, { country: '中国' }]) {
+    assert.equal(normalizeIpReport({ ip: '203.0.113.71', location }).countryCode, 'CN')
+  }
+})
 test('重新检测读取当前出口 IP，失败时清除旧风险报告并恢复脱敏', async () => {
   const urls = []
   let address = '203.0.113.71'

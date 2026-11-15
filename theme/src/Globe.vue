@@ -4,7 +4,7 @@ import world from '../../public/files/world.zh.json'
 import { createEarthSurface } from './earthSurface.js'
 import { flag, regionName } from './data.js'
 
-const props = defineProps({ motion: Boolean, light: Boolean, regions: { type: Array, required: true }, selected: String, visitorRegion: String })
+const props = defineProps({ motion: Boolean, light: Boolean, regions: { type: Array, required: true }, selected: String, visitorRegion: String, visitorFlow: { type: Boolean, default: true } })
 const emit = defineEmits(['select'])
 const canvas = ref(null)
 const dragging = ref(false)
@@ -31,6 +31,7 @@ const markerPalette = [
 const regionCodes = computed(() => props.regions.join(','))
 const located = computed(() => regionCodes.value.split(',').filter(region => places[region]).map((region, index) => ({ region, point: vector(places[region]), colors: markerPalette[index % markerPalette.length] })))
 const visitorLocation = computed(() => places[props.visitorRegion] ? vector(places[props.visitorRegion]) : null)
+const gathering = computed(() => props.visitorFlow !== false && Boolean(visitorLocation.value))
 const labels = computed(() => located.value.map((place, index) => ({
   region: place.region,
   right: index % 2 === 1,
@@ -38,7 +39,10 @@ const labels = computed(() => located.value.map((place, index) => ({
 })))
 const connections = computed(() => {
   const source = located.value.find(place => place.region === props.selected) || located.value[0]
-  return located.value.filter(target => target !== source).map(target => {
+  const pairs = gathering.value
+    ? located.value.filter(place => place.region !== props.visitorRegion).map(place => [place, { point: visitorLocation.value }])
+    : located.value.filter(target => target !== source).map(target => [source, target])
+  return pairs.map(([source, target]) => {
     const dot = source.point.reduce((sum, value, axis) => sum + value * target.point[axis], 0)
     const angle = Math.acos(Math.max(-1, Math.min(1, dot)))
     const axis = Math.abs(source.point[1]) < .9 ? [0, 1, 0] : [1, 0, 0]
@@ -87,7 +91,7 @@ function paint() {
   context.lineJoin = 'round'
   for (const [index, connection] of connections.value.entries()) {
     const points = connection.map(rotate)
-    const color = props.light ? '7,121,171' : '67,215,249'
+    const color = gathering.value ? props.light ? '18,126,104' : '100,232,195' : props.light ? '7,121,171' : '67,215,249'
     context.beginPath()
     points.forEach((point, step) => {
       if (!visible(point)) return
@@ -125,7 +129,7 @@ function paint() {
     const head = pointAt(progress)
     if (visible(head)) {
       context.shadowBlur = props.light ? 3 : 5
-      context.fillStyle = props.light ? '#0c88b9' : '#d9faff'
+      context.fillStyle = gathering.value ? props.light ? '#118466' : '#defff0' : props.light ? '#0c88b9' : '#d9faff'
       context.beginPath()
       context.arc(...screen(head), 1.1, 0, Math.PI * 2)
       context.fill()
@@ -193,6 +197,10 @@ function paint() {
     const projectedLength = Math.hypot(point[0], point[1])
     const [px, py] = screen(front ? point : projectedLength > .0001 ? [point[0] / projectedLength, point[1] / projectedLength, 0] : [1, 0, 0])
     const color = props.light ? '20,128,88' : '123,235,186'
+    const arrival = gathering.value && props.motion ? Math.min(1, connections.value.reduce((sum, _, index) => {
+      const progress = (state.elapsed / (4000 + index % 3 * 700) + index * .173) % 1
+      return sum + (progress > .9 ? Math.sin((progress - .9) * Math.PI * 10) : 0)
+    }, 0)) : 0
     if (props.motion) {
       const pulse = (state.elapsed / 2400 + .35) % 1
       context.beginPath()
@@ -207,7 +215,7 @@ function paint() {
     context.lineWidth = 2.5
     context.stroke()
     context.strokeStyle = `rgba(${color},${.65 + prominence * .35})`
-    context.lineWidth = 1.2
+    context.lineWidth = 1.2 + arrival * .35
     context.stroke()
     context.fillStyle = `rgba(${color},${prominence})`
     context.beginPath()
@@ -333,7 +341,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', restart)
 })
 watch(() => props.light, prepareScene)
-watch([() => props.motion, regionCodes, () => props.selected, () => props.visitorRegion], restart)
+watch([() => props.motion, regionCodes, () => props.selected, () => props.visitorRegion, () => props.visitorFlow], restart)
 onUnmounted(() => {
   surface?.dispose()
   observer.disconnect()

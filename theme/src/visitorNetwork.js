@@ -1,3 +1,5 @@
+import { normalizeRegion } from './data.js'
+
 export function maskIp(ip) {
   if (!ip) return '未获取 IP'
   if (ip.includes(':')) return ip.split(':').slice(0, 2).join(':') + ':••••'
@@ -14,7 +16,9 @@ export function browserInfo(userAgent) {
 export function parseTrace(text) {
   return Object.fromEntries(text.split('\n').filter(line => line.includes('=')).map(line => {
     const index = line.indexOf('=')
-    return [line.slice(0, index), line.slice(index + 1)]
+    const key = line.slice(0, index).trim()
+    const value = line.slice(index + 1).trim()
+    return [key, key === 'loc' ? normalizeRegion(value) : value]
   }))
 }
 
@@ -23,7 +27,7 @@ export function normalizeIpReport(raw) {
   return {
     ip: raw.ip,
     country: raw.location?.country || '未提供',
-    countryCode: raw.location?.country_code || '',
+    countryCode: normalizeRegion(raw.location?.country_code || raw.location?.country),
     city: raw.location?.city || '未提供',
     state: raw.location?.state || '未提供',
     timezone: raw.location?.timezone || '未提供',

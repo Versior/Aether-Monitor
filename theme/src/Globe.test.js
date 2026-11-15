@@ -22,6 +22,31 @@ test('WebGL 不可用时提供错误状态，卸载不会再抛空引用异常',
   assert.doesNotThrow(cleanup)
 })
 
+test('汇聚弧线从每个服务器国家到访客位置，同国不重复连线，缺位置时恢复节点线路', () => {
+  const sandbox = vm.createContext({
+    computed, ref, world: JSON.parse(readFileSync(new URL('../../public/files/world.zh.json', import.meta.url), 'utf8')),
+    defineProps: () => reactive({ regions: ['HK', 'JP', 'SG', 'US'], visitorRegion: 'JP', visitorFlow: true }),
+    defineEmits: () => () => {}, onMounted() {}, onUnmounted() {}, watch() {}, ResizeObserver: class {},
+  })
+  const script = readFileSync(new URL('./Globe.vue', import.meta.url), 'utf8').match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
+  vm.runInContext(script, sandbox)
+  assert.equal(vm.runInContext('connections.value.length', sandbox), 3)
+  assert.ok(vm.runInContext(`connections.value.every(path => Math.hypot(...path.at(-1).map((value, axis) => value - visitorLocation.value[axis])) < 1e-10)`, sandbox))
+  assert.ok(vm.runInContext(`connections.value.every((path, index) => Math.hypot(...path[0].map((value, axis) => value - located.value.filter(place => place.region !== props.visitorRegion)[index].point[axis])) < 1e-10)`, sandbox))
+  vm.runInContext('props.selected = "US"', sandbox)
+  assert.ok(vm.runInContext('connections.value.every(path => Math.hypot(...path.at(-1).map((value, axis) => value - visitorLocation.value[axis])) < 1e-10)', sandbox))
+  vm.runInContext('props.visitorRegion = "BR"', sandbox)
+  assert.equal(vm.runInContext('connections.value.length', sandbox), 4)
+  vm.runInContext('props.visitorFlow = false', sandbox)
+  assert.equal(vm.runInContext('gathering.value', sandbox), false)
+  assert.equal(vm.runInContext('connections.value.length', sandbox), 3)
+  vm.runInContext('props.visitorFlow = true; props.visitorRegion = "ZZ"', sandbox)
+  assert.equal(vm.runInContext('gathering.value', sandbox), false)
+  assert.equal(vm.runInContext('connections.value.length', sandbox), 3)
+  vm.runInContext('props.regions = []; props.visitorRegion = "JP"', sandbox)
+  assert.equal(vm.runInContext('connections.value.length', sandbox), 0)
+})
+
 test('拖动和俯仰旋转时，正面节点贴合地表，背面节点只在球缘提示方向', () => {
   const rings = []
   const greenRings = []
