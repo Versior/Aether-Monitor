@@ -3,12 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script id="aether-appearance">
+      window.__AETHER_PREFERENCES__ = {};
+      try {
+        const saved = JSON.parse(localStorage.getItem('orbit-preferences') || '{}');
+        if (saved && typeof saved === 'object' && !Array.isArray(saved)) window.__AETHER_PREFERENCES__ = saved;
+      } catch {}
+      const appearance = window.__AETHER_PREFERENCES__.appearance;
+      document.documentElement.dataset.appearance = appearance === 'light' || (appearance !== 'dark' && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+    </script>
+    <style>
+      html { --aether-page-bg: #080e18; background: var(--aether-page-bg); color-scheme: dark; }
+      html[data-appearance="light"] { --aether-page-bg: #f4f6fa; color-scheme: light; }
+      body { margin: 0; }
+      #app:empty { min-height: 100vh; background: var(--aether-page-bg); }
+    </style>
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-name" content="Aether · 以太" />
     <title>Cloudflare Server Monitor</title>
-    <link rel="icon" type="image/png" href="./assets/project-favicon.png" />
-    <script type="module" crossorigin src="./assets/index-XUtg8Ddv.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-C5JVXyzi.css">
+    <link rel="icon" type="image/png" href="./assets/project-favicon.png?v=1.0.2" />
+    <script type="module" crossorigin src="./assets/index-ra1Xx719.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DtESnlAD.css">
   </head>
   <body>
     <div id="app"></div>
