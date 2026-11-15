@@ -132,13 +132,23 @@ test('历史五分钟采样与实时十秒采样切换时保留连续曲线', ()
   const rows = [0, 300000, 600000, 900000, 910000, 920000, 930000, 940000, 950000, 960000].map(offset => ({ ts: start + offset, cpu: 20 }))
   assert.equal(chartSegments(rows, 'cpu', start, start + 1000000, 100).segments.length, 1)
 })
-test('自动线路只使用已完成且未过期的证据，手动标签优先', () => {
+test('自动线路保留未完成标识、过期隐藏与手动标签优先', () => {
   const route_report = { expires_at: 2000, routes: [
     { carrier: 'ct', status: 'detected', networks: ['CN2', '163'] },
     { carrier: 'cu', status: 'partial', networks: ['9929'] },
     { carrier: 'cm', status: 'failed', networks: [] },
   ] }
-  assert.deepEqual(routes({ tags: '', route_report }, 1000), ['电信 CN2 / 163'])
+  assert.deepEqual(routes({ tags: '', route_report }, 1000), ['电信 CN2 / 163', '联通 9929（路径未完成）'])
   assert.deepEqual(routes({ tags: '手动线路', route_report }, 1000), ['手动线路'])
   assert.deepEqual(routes({ tags: '', route_report }, 2000), [])
+})
+test('仅识别到国际网络时显示途经网络，保留骨干未识别的含义', () => {
+  const route_report = { expires_at: 2000, routes: [
+    { carrier: 'ct', status: 'unknown', completed: true, networks: [], transit_networks: ['TATA'] },
+    { carrier: 'cu', status: 'unknown', completed: false, networks: [], transit_networks: ['NTT'] },
+    { carrier: 'cm', status: 'unknown', completed: true, networks: [] },
+  ] }
+  assert.deepEqual(routes({ route_report }, 1000), ['电信 经 TATA'])
+  assert.deepEqual(routes({ tags: '手动线路', route_report }, 1000), ['手动线路'])
+  assert.deepEqual(routes({ route_report }, 2000), [])
 })
