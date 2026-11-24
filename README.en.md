@@ -55,7 +55,7 @@ Screenshots and previews use fictional demo servers. The current demo includes t
 
 Automatic route tags list the networks observed on the tested outbound path. A `*` marks a hop without ASN data; not observing CN2 does not rule it out. These results do not certify a provider's route tier.
 
-The updated companion detector also recognizes CTGNET, CUG, CMIN2 and common international networks. ASN evidence and local IP-prefix hints are shown separately, with protocol and attempt counts. Partial paths are marked; international-only observations use an explicit transit label and do not certify a China backbone.
+The updated companion detector also recognizes CTGNET, CUG, CMIN2 and common international networks. ASN evidence and local IP-prefix hints are shown separately, with protocol and attempt counts. Observed backbone networks are shown by name without a path-completion badge. International-only observations use an explicit transit label and do not certify a China backbone.
 
 ## Visitor privacy
 

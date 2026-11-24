@@ -1,7 +1,7 @@
 <script setup>
 defineProps({ report: { type: Object, default: null }, now: { type: Number, required: true } })
 const names = { ct: '电信', cu: '联通', cm: '移动' }
-const states = { detected: '观测到的网络', partial: '路径未完成', unknown: '未识别', failed: '检测失败', disabled: '已关闭' }
+const states = { unknown: '未识别', failed: '检测失败', disabled: '已关闭' }
 </script>
 
 <template>
@@ -10,7 +10,11 @@ const states = { detected: '观测到的网络', partial: '路径未完成', unk
     <p>VPS 到配置目标的单向路径；ASN 与 IP 段匹配分别列出。* 表示该跳未返回 ASN，未出现某个网络不代表没有经过。“经”表示观测到的国际网络，骨干仍未识别。结果不认证 GIA / GT，也不代表相反方向。</p>
     <div v-for="route in report.routes" :key="`${route.carrier}-${route.family}`" class="route-evidence-row">
       <span>{{ names[route.carrier] }} · IPv{{ route.family }}<small v-if="route.protocol" class="probe-method">选用 {{ route.protocol.toUpperCase() }} · 共 {{ route.attempts }} 次尝试</small></span>
-      <strong :class="{ verified: report.expires_at > now && route.status === 'detected' }">{{ route.networks.join(' / ') || '—' }}<small>{{ report.expires_at <= now ? '结果已过期' : states[route.status] }}</small></strong>
+      <strong :class="{ verified: report.expires_at > now && route.networks.length > 0 }">
+        {{ route.networks.join(' / ') }}
+        <small v-if="report.expires_at <= now">结果已过期</small>
+        <small v-else-if="!route.networks.length">{{ states[route.status] || states.unknown }}</small>
+      </strong>
       <code v-if="route.hops.some(hop => hop.length)">{{ route.hops.map(hop => hop.length ? hop.map(asn => `AS${asn}`).join('|') : '*').join(' → ') }}</code>
       <small v-if="route.prefix_hints?.length" class="evidence-note">IP 段匹配：{{ route.prefix_hints.map(hint => `${hint.network} (${hint.prefix})`).join(' / ') }}</small>
       <small v-if="route.transit_networks?.length" class="evidence-note">途经网络：{{ route.transit_networks.join(' / ') }}</small>
