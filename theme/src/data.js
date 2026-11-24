@@ -74,7 +74,7 @@ export function routes(node, now = Date.now()) {
   return [...new Set(node.route_report.routes.filter(route => route.status === 'detected' ||
     route.status === 'partial' && route.networks.length ||
     route.status === 'unknown' && route.completed && route.transit_networks?.length)
-    .map(route => `${{ ct: '电信', cu: '联通', cm: '移动' }[route.carrier]} ${route.status === 'unknown' ? '经 ' + route.transit_networks.join(' / ') : route.networks.join(' / ')}${route.status === 'partial' ? '（路径未完成）' : ''}`))]
+    .map(route => `${{ ct: '电信', cu: '联通', cm: '移动' }[route.carrier]} ${route.status === 'unknown' ? '经 ' + route.transit_networks.join(' / ') : route.networks.join(' / ')}`))]
 }
 export const hasIp = (node, version) => node[`ip_v${version}`] === '1'
 export const usage = (used, total) => used === null || used === undefined || !(total > 0) ? null : Math.round(used / total * 100)

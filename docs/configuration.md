@@ -102,7 +102,7 @@ assets/
 
 ## 自动线路检测接口
 
-配套 Worker 支持 `route_report` 时，主题在没有手动标签时展示未过期的自动线路结果，网络详情可展开 ASN 和 IP 段匹配证据。路径未完成时明确标注；仅观测到国际网络时显示“经 TATA”等标签，仍不能确认中国骨干。需要在 VPS 安装检测脚本并升级 Worker 数据库，步骤见 [CF-Server-Monitor 自动线路检测](https://github.com/Versior/CF-Server-Monitor/blob/main/docs/route-detection.md)。普通宿主没有该字段时继续显示后台标签。检测只表示到配置目标的单向路径，不认证 GIA/GT。
+配套 Worker 支持 `route_report` 时，主题在没有手动标签时展示未过期的自动线路结果，网络详情可展开 ASN 和 IP 段匹配证据。已观测到的骨干线路直接显示名称；仅观测到国际网络时显示“经 TATA”等标签，仍不能确认中国骨干。需要在 VPS 安装检测脚本并升级 Worker 数据库，步骤见 [CF-Server-Monitor 自动线路检测](https://github.com/Versior/CF-Server-Monitor/blob/main/docs/route-detection.md)。普通宿主没有该字段时继续显示后台标签。检测只表示到配置目标的单向路径，不认证 GIA/GT。
 
 `163` 对应 AS4134，`CN2` 对应 AS4809；新版也可用实际回应的 IP 段辅助匹配，来源在详情中标明。`*` 表示该跳未返回 ASN；有缺失跳时，没有观测到 CN2 不能证明整条路径没有经过 CN2。进一步确认需要服务器上的完整路由输出，不应根据节点名称覆盖自动结果。
 
