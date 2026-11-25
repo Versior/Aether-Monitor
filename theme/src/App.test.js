@@ -9,18 +9,23 @@ import * as data from './data.js'
 function app(savedPreferences = {}, systemLight = false) {
   const requests = []
   const storage = new Map()
+  const sockets = []
   const sandbox = vm.createContext({
     ...data, computed, nextTick, reactive, ref, watch,
     onMounted() {}, onUnmounted() {},
     window: { __AETHER_PREFERENCES__: savedPreferences, matchMedia: () => ({ matches: systemLight }), location: { hash: '#/' } },
     document: { title: '测试监控站', querySelector: () => ({ href: 'https://example.invalid/site-icon.svg' }), documentElement: { dataset: {} }, body: { style: {} } }, localStorage: { setItem: (key, value) => storage.set(key, value) },
     isServerOnline: () => true, DEFAULT_SITE_TITLE: 'Test',
+    createLiveSocket: (scope, handlers, index, ids) => {
+      sockets.push([...ids])
+      return { close() {} }
+    },
     http: { get: path => new Promise(resolve => requests.push({ path, resolve })) },
   })
   const script = readFileSync(new URL('./App.vue', import.meta.url), 'utf8').match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
   vm.runInContext(script, sandbox)
   vm.runInContext('nodes.value = [{ id: "a", name: "A" }]; detailId.value = "a";', sandbox)
-  return { requests, storage, run: code => vm.runInContext(code, sandbox) }
+  return { requests, sockets, storage, run: code => vm.runInContext(code, sandbox) }
 }
 
 test('首次渲染使用已保存的深色和纯色背景，无需等待站点配置', () => {
@@ -137,4 +142,44 @@ test('接口返回 401 后清空旧节点和详情，避免继续展示授权快
   assert.equal(harness.run('detailId.value'), '')
   assert.equal(harness.run('snapshotAt.value'), null)
   assert.equal(harness.run('config.value.authorization'), false)
+})
+
+test('自动刷新尚未结束时点击重新连接，共用请求并在完成后重连一次', async () => {
+  const harness = app()
+  harness.run('snapshotAt.value = 1; error.value = "上次同步失败"; connect()')
+  const automatic = harness.run('refreshSnapshot()')
+  assert.equal(harness.run('reconnecting.value'), false)
+  const manual = harness.run('reconnect()')
+  assert.equal(harness.run('reconnecting.value'), true)
+  assert.deepEqual(harness.requests.map(request => request.path), ['/api/config'])
+  harness.requests[0].resolve({ data: { is_public: true } })
+  await new Promise(setImmediate)
+  assert.equal(harness.requests[1].path, '/api/servers')
+  harness.requests[1].resolve({ data: { servers: [{ id: 'a', name: 'A' }], sysConfig: {} } })
+  await Promise.all([automatic, manual])
+  assert.deepEqual(harness.sockets, [['a'], ['a']])
+  assert.equal(harness.run('reconnecting.value'), false)
+  assert.equal(harness.run('error.value'), '')
+})
+
+test('手动重连失败显示对应接口并保留已加载数据，下一次可以恢复', async () => {
+  const harness = app()
+  harness.run('snapshotAt.value = 1; error.value = "上次同步失败"; connect()')
+  const failed = harness.run('reconnect()')
+  harness.requests[0].resolve({ error: 'Internal Server Error', status: 500, rayId: 'test-ray-id' })
+  await failed
+  assert.match(harness.run('error.value'), /\/api\/config.*500.*test-ray-id/)
+  assert.equal(harness.run('nodes.value.length'), 1)
+  assert.equal(harness.run('refreshing.value'), false)
+  assert.equal(harness.sockets.length, 1)
+
+  const recovered = harness.run('reconnect()')
+  assert.equal(harness.run('refreshing.value'), true)
+  harness.requests[1].resolve({ data: { is_public: true } })
+  await new Promise(setImmediate)
+  harness.requests[2].resolve({ data: { servers: [{ id: 'a', name: 'A' }], sysConfig: {} } })
+  await recovered
+  assert.equal(harness.run('refreshing.value'), false)
+  assert.equal(harness.run('error.value'), '')
+  assert.equal(harness.sockets.length, 2)
 })

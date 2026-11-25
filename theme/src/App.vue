@@ -22,6 +22,8 @@ const siteTitle = computed(() => config.value.site_title || initialTitle)
 const siteIcon = document.querySelector('link[rel~="icon"]').href
 const sysConfig = ref({})
 const loading = ref(true)
+const refreshing = ref(false)
+const reconnecting = ref(false)
 const error = ref('')
 const clock = ref(Date.now())
 const snapshotAt = ref(null)
@@ -61,7 +63,7 @@ const historyError = ref('')
 const detailDialog = ref(null)
 const lastFocus = ref(null)
 const pending = new Map()
-const runtime = { socket: null, timer: null, refreshTimer: null, refreshRunning: false, stopped: false, historyRequest: 0 }
+const runtime = { socket: null, timer: null, refreshTimer: null, refreshTask: null, stopped: false, historyRequest: 0 }
 const online = node => isServerOnline(node, clock.value)
 const light = computed(() => prefs.appearance === 'light' || (prefs.appearance === 'auto' && systemLight.value))
 const needsVerification = computed(() => config.value.turnstile_enabled && !config.value.verified && (config.value.is_public || config.value.authorization))
@@ -121,6 +123,7 @@ async function request(path) {
   const result = await http.get(path, { autoRedirect: false, timeoutMs: 15000 })
   if (result.status === 401) {
     runtime.socket?.close()
+    runtime.socket = null
     pending.clear()
     detailId.value = ''
     nodes.value = []
@@ -129,7 +132,13 @@ async function request(path) {
     config.value = { ...config.value, authorization: false }
   }
   if (result.status === 403 && config.value.turnstile_enabled) config.value = { ...config.value, verified: false }
-  if (result.error) throw new Error(`数据读取失败（${result.status || '网络'}）：${result.error}`)
+  const endpoint = path.split('?')[0]
+  if (result.error) {
+    const reason = result.timeout ? '请求超时' : result.error
+    const ray = result.rayId ? ` · Ray ID ${result.rayId}` : ''
+    throw new Error(`${endpoint} 读取失败（${result.status || '网络'}）：${reason}${ray}`)
+  }
+  if (result.data === null) throw new Error(`${endpoint} 返回了无法读取的数据`)
   return result.data
 }
 async function loadNodes() {
@@ -146,32 +155,43 @@ function connect() {
     onTimeout: () => { error.value = '实时连接已达到站点设置时限，可以重新连接。'; runtime.stopped = true },
   }, 0, nodes.value.map(node => node.id))
 }
-async function refreshSnapshot() {
-  if (document.hidden || runtime.refreshRunning || runtime.stopped) return
-  runtime.refreshRunning = true
+function refreshSnapshot(restartSocket = false) {
+  if (document.hidden || runtime.stopped) return
+  if (restartSocket) reconnecting.value = true
+  if (runtime.refreshTask) return runtime.refreshTask
+  refreshing.value = true
   const previousIds = nodes.value.map(node => node.id).join(',')
-  try {
-    const updatedConfig = await request('/api/config')
-    config.value = updatedConfig
-    document.title = siteTitle.value
-    if (needsVerification.value) { error.value = ''; return }
-    await loadNodes()
-    if (previousIds !== nodes.value.map(node => node.id).join(',')) connect()
-    error.value = ''
-  } catch (cause) { error.value = cause.message }
-  finally { runtime.refreshRunning = false }
+  runtime.refreshTask = (async () => {
+    try {
+      config.value = await request('/api/config')
+      document.title = siteTitle.value
+      if (needsVerification.value) { error.value = ''; return }
+      await loadNodes()
+      if (runtime.stopped) return
+      if (!document.hidden && (reconnecting.value || !runtime.socket || previousIds !== nodes.value.map(node => node.id).join(','))) connect()
+      error.value = ''
+    } catch (cause) { error.value = cause.message }
+    finally {
+      refreshing.value = false
+      reconnecting.value = false
+      runtime.refreshTask = null
+    }
+  })()
+  return runtime.refreshTask
 }
-async function reconnect() {
+function reconnect() {
   runtime.stopped = false
-  await refreshSnapshot()
-  if (!error.value && !needsVerification.value) connect()
+  return refreshSnapshot(true)
 }
 async function verified() { await reconnect(); await hashChanged() }
-async function visibilityChanged() {
-  if (document.hidden) { runtime.socket?.close(); pending.clear(); return }
-  if (runtime.stopped) return
-  await refreshSnapshot()
-  if (!needsVerification.value) connect()
+function visibilityChanged() {
+  if (document.hidden) {
+    runtime.socket?.close()
+    runtime.socket = null
+    pending.clear()
+    return
+  }
+  return refreshSnapshot(true)
 }
 async function loadHistory() {
   const id = detailId.value
@@ -231,7 +251,7 @@ watch(light, value => { document.documentElement.dataset.appearance = value ? 'l
 watch(prefs, () => { Object.assign(savedPreferences, prefs); localStorage.setItem('orbit-preferences', JSON.stringify(prefs)) })
 watch(historyHours, loadHistory)
 watch(maxHistoryHours, hours => { if (historyHours.value > hours) historyHours.value = hours })
-watch(needsVerification, needed => { if (needed) { runtime.socket?.close(); pending.clear(); detailId.value = ''; nodes.value = []; sysConfig.value = {}; snapshotAt.value = null } })
+watch(needsVerification, needed => { if (needed) { runtime.socket?.close(); runtime.socket = null; pending.clear(); detailId.value = ''; nodes.value = []; sysConfig.value = {}; snapshotAt.value = null } })
 watch(show, () => { if (!issueOptions.value.includes(issueFilter.value)) issueFilter.value = '全部状态'; if (!detailTabs.value.includes(detailTab.value)) detailTab.value = '概览'; if (!show.value.expire && sort.value === '到期从近到远' || !show.value.network && sort.value === '丢包从高到低') sort.value = '默认排序' })
 watch(() => Boolean(detailNode.value) || settingsOpen.value, open => { document.body.style.overflow = open ? 'hidden' : '' })
 
@@ -313,7 +333,7 @@ onUnmounted(() => {
         <div class="node-header">
         <h2><UiIcon name="server" />服务器<span>{{ snapshotAt ? visibleNodes.length : '—' }}</span></h2>
           <div class="group-tabs" aria-label="节点分组"><button v-for="item in groups" :key="item" :aria-pressed="group === item" :class="{ selected: group === item }" @click="group = item">{{ item === '全部节点' ? '全部' : item }}<small>{{ snapshotAt ? (item === '全部节点' ? nodes.length : nodes.filter(node => node.server_group === item).length) : '—' }}</small></button></div>
-          <div class="node-header-actions"><button class="icon-button refresh-button" aria-label="刷新节点" title="刷新节点" @click="refreshSnapshot"><UiIcon name="refresh" /></button><div class="view-switch"><button :class="{ selected: effectiveView === 'card' }" :aria-pressed="effectiveView === 'card'" aria-label="卡片视图" @click="prefs.view = 'card'"><UiIcon name="grid" /><span>卡片</span></button><button :class="{ selected: effectiveView === 'table' }" :aria-pressed="effectiveView === 'table'" aria-label="表格视图" @click="prefs.view = 'table'"><UiIcon name="list" /><span>列表</span></button><button v-if="show.network" :class="{ selected: effectiveView === 'network' }" :aria-pressed="effectiveView === 'network'" aria-label="网络质量矩阵" @click="prefs.view = 'network'"><UiIcon name="activity" /><span>网络</span></button></div>
+          <div class="node-header-actions"><button class="icon-button refresh-button" :aria-label="refreshing ? '正在刷新节点' : '刷新节点'" :title="refreshing ? '正在刷新节点' : '刷新节点'" :disabled="loading || refreshing" @click="refreshSnapshot()"><UiIcon name="refresh" /></button><div class="view-switch"><button :class="{ selected: effectiveView === 'card' }" :aria-pressed="effectiveView === 'card'" aria-label="卡片视图" @click="prefs.view = 'card'"><UiIcon name="grid" /><span>卡片</span></button><button :class="{ selected: effectiveView === 'table' }" :aria-pressed="effectiveView === 'table'" aria-label="表格视图" @click="prefs.view = 'table'"><UiIcon name="list" /><span>列表</span></button><button v-if="show.network" :class="{ selected: effectiveView === 'network' }" :aria-pressed="effectiveView === 'network'" aria-label="网络质量矩阵" @click="prefs.view = 'network'"><UiIcon name="activity" /><span>网络</span></button></div>
         </div>
         </div>
         <div class="node-controls">
@@ -328,7 +348,10 @@ onUnmounted(() => {
           <label>排序<select v-model="sort" aria-label="排序节点"><option>默认排序</option><option>名称</option><option>CPU 从高到低</option><option v-if="show.expire">到期从近到远</option><option v-if="show.network">丢包从高到低</option></select></label>
         </div>
         <div v-if="activeFilters.length" class="active-filters"><span>已筛选</span><button v-for="field in activeFilters" :key="field.key" :aria-label="'移除' + field.label + '筛选'" @click="field.state.value = field.initial">{{ field.label }}：{{ field.key === 'region' ? regionName(field.state.value) : field.state.value }}<UiIcon name="close" /></button><button class="clear-all" @click="clearFilters">重置</button></div>
-        <div v-if="error && !needsVerification" class="error-state" role="alert">{{ error }} <button @click="reconnect">重新连接</button><a :href="adminUrl">后台登录</a></div>
+        <div v-if="error && !needsVerification" class="error-state refresh-error">
+          <span role="status">{{ error }}</span>
+          <button :disabled="reconnecting" @click="reconnect">{{ reconnecting ? '正在连接…' : '重新连接' }}</button>
+        </div>
         <SiteVerification v-if="needsVerification" :key="config.turnstile_site_key" :site-key="config.turnstile_site_key" :light="light" @verified="verified" />
         <div v-else-if="loading" class="loading-grid" role="status" aria-label="正在读取服务器数据"><div v-for="item in 3" :key="item" class="node-skeleton"><i /><i /><i /><i /></div></div><div v-else-if="!visibleNodes.length && !error" class="empty-state"><UiIcon name="search" class="empty-symbol" /><strong>{{ nodes.length ? '没有符合条件的节点' : '还没有服务器节点' }}</strong><p>{{ nodes.length ? '调整搜索词或清除筛选后再看看。' : '添加探针后，节点会显示在这里。' }}</p><button v-if="nodes.length" @click="clearFilters">清除筛选</button><a v-else :href="adminUrl">管理后台<UiIcon name="external" /></a></div>
         <div v-else-if="effectiveView === 'card'" class="node-grid"><NodeCard v-for="node in visibleNodes" :key="node.id" :node="node" :online="online(node)" :full="prefs.layout === 'full'" :show="show" :probes="probes" :now="clock" @open="openDetail" /></div>

@@ -104,7 +104,8 @@ const handleResponse = async (res, options = {}) => {
     } catch (e) {
       // ignore
     }
-    return { error: errorMessage, code: errorCode, status: res.status, message: errorMessageKey }
+    const rayId = res.status >= 500 ? res.headers.get('cf-ray') : null
+    return { error: errorMessage, code: errorCode, status: res.status, message: errorMessageKey, rayId }
   }
   
   try {
