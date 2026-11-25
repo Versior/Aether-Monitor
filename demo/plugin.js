@@ -32,11 +32,11 @@ export function localDemo(root) {
         const now = Date.now()
         let data
         if (url.pathname === '/api/config') data = config
-        if (url.pathname === '/api/servers') data = { servers: demoNodes.map((node, index) => server(node, index, now)), sysConfig }
+        if (url.pathname === '/api/servers') data = { servers: demoNodes.map((node, index) => server(node, index, now)), stats: { total: demoNodes.length, online: demoNodes.filter(node=>node.online).length, offline: demoNodes.filter(node=>!node.online).length }, sysConfig }
         if (['/api/server', '/api/history/all'].includes(url.pathname)) {
           const index = demoNodes.findIndex(node => node.id === url.searchParams.get('id'))
           if (index < 0) { res.writeHead(404); res.end(); return }
-          data = url.pathname === '/api/server' ? server(demoNodes[index], index, now) : history(demoNodes[index], index, demoNodes[index].online ? now : offlineAt, Number(url.searchParams.get('hours') || 1))
+          data = url.pathname === '/api/server' ? { ...server(demoNodes[index], index, now), sysConfig } : history(demoNodes[index], index, demoNodes[index].online ? now : offlineAt, Number(url.searchParams.get('hours') || 1))
         }
         if (url.pathname === '/__theme/network-info') data = { ip: '203.0.113.71', isp: { asn: 'AS65536', org: '示例网络组织', isp: '示例运营商' }, location: { country: '中国', country_code: 'cn', city: '南京 · 示例', timezone: 'Asia/Shanghai' }, risk: { is_proxy: false, is_vpn: false, is_tor: false, is_datacenter: true, is_mobile: false, risk_score: 0 } }
         if (url.pathname === '/cdn-cgi/trace') { res.setHeader('Content-Type', 'text/plain'); res.end('ip=203.0.113.71\nloc=CN\ntls=TLSv1.3\n'); return }

@@ -9,7 +9,11 @@
         const saved = JSON.parse(localStorage.getItem('orbit-preferences') || '{}');
         if (saved && typeof saved === 'object' && !Array.isArray(saved)) window.__AETHER_PREFERENCES__ = saved;
       } catch {}
-      const appearance = window.__AETHER_PREFERENCES__.appearance;
+      const primary = document.querySelector('meta[name="apiBase"]')?.content.split(',')[0].trim() || window.location.origin;
+      const siteAppearance = { key: 'aether:site-appearance:' + new URL(primary).origin, value: null };
+      try { siteAppearance.value = localStorage.getItem(siteAppearance.key); } catch {}
+      window.__AETHER_SITE_APPEARANCE__ = siteAppearance;
+      const appearance = window.__AETHER_PREFERENCES__.appearance ?? siteAppearance.value;
       document.documentElement.dataset.appearance = appearance === 'light' || (appearance !== 'dark' && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
     </script>
     <style>

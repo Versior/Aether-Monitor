@@ -8,14 +8,24 @@
 
 ## 独立静态托管
 
-1. 复制 `.env.example` 为 `.env`，将 `API_BASE` 设置为自己的 CF-Server-Monitor 源站 origin。
+1. 复制 `.env.example` 为 `.env`，将 `API_BASE` 设置为自己的 CF-Server-Monitor 源站 origin。支持英文逗号分隔多个 origin，各站只订阅自己的节点。
 2. 运行 `npm run build`，将 `dist/` 的内容部署到静态服务。构建时会注入 `meta[name="apiBase"]`。
 3. 在后端配置 `CORS_ALLOWED_ORIGINS`，加入主题页面的 origin。仅包含协议、主机与端口，不包含路径。
 4. 自己设置 CSP 时，允许 API origin 的 HTTPS/WSS 请求，以及国旗／系统图标所在的 API 源站。
 
-跨域登录状态受到浏览器同源存储与 Cookie 策略限制。私有站点优先使用宿主的同源主题安装方式；静态托管推荐用于公开站点。
+每个后端都要配置 CORS。跨域请求与 WebSocket 的凭据按后端隔离；在 Worker 后台登录，不会自动把 JWT 写入独立静态站的浏览器存储。**私有站点优先用同源安装**，让宿主处理登录和 Cookie；不要把 JWT 写进 URL、`.env` 或静态构建的 Secrets。独立静态托管适合公开站点。
 
 开发时设置 `API_BASE` 会读取配置中的真实后端并关闭本地示例。浏览器直接请求该后端，需要允许本地 origin `http://127.0.0.1:5175`。不要在 `API_BASE` 中放 JWT、密码或其他凭据。
+
+## 监控请求与历史
+
+每个站点首次读 `/api/config`，首页读一次 `/api/servers`，此后的实时更新来自 WebSocket，没有定时 REST 轮询。页面隐藏时关闭连接并保留读数；恢复可见时按当前页面补一次快照。达到站点设置的实时连接时限后，须手动继续。
+
+配套的 Versior Worker 也在 `/api/server.sysConfig` 返回这四个显示开关，允许冷打开详情直接使用；旧版接口缺失时主题不会猜测开关。
+
+首页打开详情弹窗复用列表连接。直接打开某个节点的详情只读取该节点与 `/api/history/all`，并只订阅该节点。详情默认显示最近 10 分钟；可切换为 30 分钟或 1、6、12、24、48、96、168 小时，未登录最多 24 小时。切换时只读历史；延迟与丢包曲线共用这份数据。
+
+原版宿主的详情响应可能只有 `long_history_points`，没有 `show_price`、`show_expire`、`show_tf` 或 `show_three_net_details`。冷启动无法确认开关时只展示基础资源，不为了猜开关额外读取全站列表。如需被隐藏的网络、流量或账单面板，先进入首页取得本站开关，再打开详情。
 
 ## 主题选项
 
@@ -30,6 +40,7 @@
     "globe": true,
     "motion": true,
     "visitorFlow": true,
+    "visitorLookup": true,
     "background": "project",
     "cardOpacity": 100,
     "panelBlur": 12
@@ -45,13 +56,14 @@
 | `globe` | `true`、`false` | `true` |
 | `motion` | `true`、`false` | `true` |
 | `visitorFlow` | `true`、`false`；节点向访客国家汇聚 | `true` |
+| `visitorLookup` | `true` 提供手动检测入口；`false` 隐藏入口，禁用 trace／IPQuery | `true` |
 | `background` | `project`（项目背景）、`default`（纯色背景） | `project` |
 | `cardOpacity` | 40–100；卡片背景不透明度百分比 | 100 |
 | `panelBlur` | 0–20；半透明卡片背景模糊像素 | 12 |
 
 页头的“主题设置”提供项目背景与纯色背景两个可见选项，并可调整透明度、模糊、配色、卡片信息和地球动效。项目背景兼容宿主桌面背景及手机 `body::after` 背景；纯色背景关闭图片与环境光效果，底色跟随深浅色。文字保持不透明。
 
-浏览器保存的选择优先于站点默认值。沿用 `orbit-preferences` 存储键，保留已有用户的选择；旧 `theme_options.orbit` 配置仍可读取。“恢复站点默认”会清除个人偏好。主题只读取服务端配置，个人设置不写管理后台。
+浏览器把个人覆盖保存在 `orbit-preferences`；未覆盖的选项跟随服务端默认，旧 `theme_options.orbit` 仍可读取。普通调整只影响本机。“恢复站点默认”只清除个人覆盖；已登录管理员可显式选择“保存为站点默认”，通过 `POST /api/theme_options` 更新 `theme_options.aether`，保留其他主题选项，多站点只写第一站。成功后清除本机覆盖；失败显示错误。
 
 HTML 在主脚本加载前恢复保存的配色与首屏底色，页面组件在首次渲染时使用同一份个人偏好，无需等待配置接口。跟随系统模式继续响应系统配色变化。
 
@@ -59,7 +71,9 @@ HTML 在主脚本加载前恢复保存的配色与首屏底色，页面组件在
 
 ## 访客网络
 
-同源安装时，在宿主 **后台 → 外观设置 → CSP API 域名白名单** 中加入 `https://api.ipquery.io`；有其他域名时用英文逗号分隔。独立托管时，将同一地址加入 `connect-src`。启用后，页面会向 IPQuery 发送访客出口 IP 获取风险评分。国旗和系统图标从 API 源站读取；如果独立静态部署，`img-src` 需要允许该源站。
+打开页面或展开面板不会读取 trace，也不会联系 IPQuery。访客在隐私提示下主动点击检测后，浏览器才尝试访问第一站的 `/cdn-cgi/trace`，再向 `https://api.ipquery.io` 查询出口 IP 的归属与风险。若 trace 不能提供地址，会在同一次授权检测中向 IPQuery 读取出口 IP。结果仅存在本页内存，默认脱敏；外部服务仍会收到真实出口地址。
+
+需要这个功能时，在宿主 **后台 → 外观设置 → CSP API 域名白名单** 加入 `https://api.ipquery.io`；独立静态托管可将其写入 `CSP_API`。严格限定监控 API 时，把**站点默认** `theme_options.aether.visitorLookup` 设为 `false`：即使浏览器有旧的 `true`，也不提供入口。`visitorFlow` 只控制动画。国旗／系统图标来自节点所属 API 源站，独立静态服务的 `img-src` 需允许这些源站。
 
 访客网络数据并非服务器 IP 清单。VPS 的 `ip_v4`、`ip_v6` 是 Agent 上报的协议支持标记，主题不把它们作为真实服务器地址。
 
@@ -79,14 +93,26 @@ HTML 在主脚本加载前恢复保存的配色与首屏底色，页面组件在
 
 ## 发布结构
 
-`main` 分支保存源码与文档，`build` 分支的根目录只保存：
+`main` 保存源码。工作流在推送 `main` 或从 `main` 手动运行时测试并分别构建两个分支；每个发布提交保留对应源码提交说明和 SHA。`dist` 用于 GitHub Pages／独立静态托管，`build` 为原有同源安装 URL 保持不绑定任何 Worker 的构建。两者均以旧分支提交为父提交追加，不强推；首次创建 `dist` 时如果有旧 `build` 历史，会承接它。两个发布根目录都只包含：
 
 ```text
 index.html
 assets/
 ```
 
-发布 ZIP 使用同一份构建产物。更新源码后运行 `npm ci && npm test && npm run package`，验证页面，再将产物发布到 `build` 分支。这些命令只测试和生成主题产物，不更改线上监控站点。
+在仓库 **Settings → Secrets and variables → Actions** 配置 Pages 构建参数。以下五项会进入**公开页面**，不要放凭据：
+
+| Secret | 用途 |
+| --- | --- |
+| `API_BASE` | 独立 Pages 必填：一个或多个 Worker 的 HTTP(S) origin，用英文逗号分隔；留空则请求页面自己的 origin |
+| `TITLE` | 可选的 HTML 标题；读取宿主配置后优先展示 `site_title` |
+| `BACKGROUND_IMAGE` | 可选的公开 HTTP(S) 背景图 URL |
+| `CSP_API` | 额外允许连接的 HTTP(S) origin 列表；如需手动访客检测，加入 `https://api.ipquery.io` |
+| `CSP_STATIC` | 额外允许静态资源的 HTTP(S) origin 列表 |
+
+启用 Actions，并允许该工作流写仓库内容（`contents: write`；**Settings → Actions → General → Workflow permissions**）。首次生成分支后，在 **Settings → Pages → Deploy from a branch** 选择 **`dist` / `(root)`**。默认 `GITHUB_TOKEN` 能更新 `dist` 和 `build`；按 [GitHub 的分支发布规则](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)，它推送的提交不会触发 Pages 重建。需要让每次推送也发布 Pages 时，可为该仓库配置单独的 `PAGES_PUBLISH_TOKEN`（限当前仓库、Contents: write，其账号须有 Pages 发布资格）。这是 Git 凭据，仅作 Actions secret，**不属于静态构建参数**。分支保护应允许所选发布身份更新这两个分支。
+
+本地使用 `npm ci && npm test && npm run package` 验证并生成 ZIP、SHA-256；不修改线上站点。`npm test` 包含本地 bare Git 回归，实际构建两种配置并验证分支历史、提交说明和重跑行为。
 
 ## 常见问题
 
@@ -100,7 +126,7 @@ assets/
 
 **三网或价格没有显示**：检查宿主的展示开关和实际 Agent 数据。主题尊重这些开关。
 
-**本地示例没有真实后台**：示例仅提供主题所用的读取接口与模拟推送。管理端使用正式 CF-Server-Monitor。
+**本地示例没有真实后台**：示例提供虚构的节点与模拟推送；验证实际管理登录、保存站点默认或启用私有部署时使用自己的 CF-Server-Monitor。
 
 ## 自动线路检测接口
 

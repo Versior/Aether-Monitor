@@ -36,7 +36,7 @@ test('重新检测读取当前出口 IP，失败时清除旧风险报告并恢�
   let address = '203.0.113.71'
   let failed = false
   const sandbox = vm.createContext({
-    computed, ref, watch, onMounted() {}, defineEmits: () => () => {},
+    computed, ref, watch, onUnmounted() {}, AbortController, t:(s,p)=>p?s.replace('{status}',p.status):s, locale:ref('zh-CN'), defineEmits: () => () => {},
     navigator: { userAgent: 'Chrome/130.0' }, getApiBases: () => ['https://monitor.example.com'],
     browserInfo, maskIp, normalizeIpReport, parseTrace, URL, AbortSignal,
     fetch: async url => {
@@ -58,7 +58,14 @@ test('重新检测读取当前出口 IP，失败时清除旧风险报告并恢�
   vm.runInContext('revealed.value = true', sandbox)
   await vm.runInContext('inspect()', sandbox)
   assert.equal(vm.runInContext('report.value', sandbox), null)
-  assert.equal(vm.runInContext('riskScore.value', sandbox), null)
+  assert.equal(vm.runInContext('score.value', sandbox), null)
   assert.equal(vm.runInContext('revealed.value', sandbox), false)
   assert.match(vm.runInContext('error.value', sandbox), /503/)
+})
+
+test('挂载及展开访客面板不触发出口或 IPQuery 请求', async () => {
+  let calls=0; const mounted=[]
+  const sandbox=vm.createContext({computed,ref,watch, t:s=>s, locale:ref('zh-CN'), onMounted:f=>mounted.push(f),onUnmounted(){},defineEmits:()=>()=>{},navigator:{userAgent:'Firefox/100'},getApiBases:()=>['https://example.invalid'],browserInfo,maskIp,normalizeIpReport,parseTrace, URL,AbortController,AbortSignal,fetch:async()=>{calls++;throw Error('Unexpected egress')}})
+  const script=readFileSync(new URL('./VisitorNetwork.vue',import.meta.url),'utf8').match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm,'').replace('import.meta.env.AETHER_DEMO','false'); vm.runInContext(script,sandbox)
+  await Promise.all(mounted.map(f=>f())); vm.runInContext('open.value=true',sandbox); assert.equal(calls,0)
 })

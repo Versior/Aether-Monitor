@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import world from '../../public/files/world.zh.json'
 import { createEarthSurface } from './earthSurface.js'
 import { flag, regionName } from './data.js'
+import { t } from './i18n.js'
 
 const props = defineProps({ motion: Boolean, light: Boolean, regions: { type: Array, required: true }, selected: String, visitorRegion: String, visitorFlow: { type: Boolean, default: true } })
 const emit = defineEmits(['select'])
@@ -353,10 +354,10 @@ onUnmounted(() => {
 
 <template>
   <div class="globe-visual" :style="{ '--flag-inset': flagInset + 'px' }">
-    <canvas ref="canvas" v-show="!globeError" class="globe-canvas" :class="{ dragging }" :title="visitorLocation ? '绿色点：访客 IP 归属国家 · ' + regionName(visitorRegion) + '（国家级示意）' : ''" aria-label="全球服务器分布，可拖动或使用方向键旋转，绿色点代表访客 IP 归属国家" role="img" tabindex="0" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp" @keydown="keyboardRotate" />
-    <p v-if="globeError" class="globe-error" role="status">{{ globeError }}</p>
-    <div v-else class="globe-locations" aria-label="地球地区标识">
-      <button v-for="label in labels" :key="label.region" class="globe-location" :class="{ right: label.right, selected: label.region === selected }" :style="{ top: label.top * 100 + '%' }" :title="regionName(label.region)" :aria-label="'地球地区：' + regionName(label.region)" :aria-pressed="selected === label.region" @click="emit('select', label.region)"><img v-if="flag(label.region)" :src="flag(label.region)" alt=""></button>
+    <canvas ref="canvas" v-show="!globeError" class="globe-canvas" :class="{ dragging }" :title="visitorLocation ? t('访客 IP 归属国家：{name}',{name:regionName(visitorRegion)}) : ''" :aria-label="t('全球服务器分布，可拖动或使用方向键旋转，绿色点代表访客 IP 归属国家')" role="img" tabindex="0" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp" @keydown="keyboardRotate" />
+    <p v-if="globeError" class="globe-error" role="status">{{ t(globeError) }}</p>
+    <div v-else class="globe-locations" :aria-label="t('地球地区标识')">
+      <button v-for="label in labels" :key="label.region" class="globe-location" :class="{ right: label.right, selected: label.region === selected }" :style="{ top: label.top * 100 + '%' }" :title="regionName(label.region)" :aria-label="t('地球地区：{name}',{name:regionName(label.region)})" :aria-pressed="selected === label.region" @click="emit('select', label.region)"><img v-if="flag(label.region)" :src="flag(label.region)" alt=""></button>
     </div>
   </div>
 </template>

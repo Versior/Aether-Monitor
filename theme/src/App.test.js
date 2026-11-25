@@ -2,184 +2,57 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
-import { compile, computed, createSSRApp, nextTick, reactive, ref, watch } from 'vue'
+import { compile, computed, createSSRApp, defineAsyncComponent, h, nextTick, reactive, ref, watch } from 'vue'
 import { renderToString } from 'vue/server-renderer'
+import { adminUrl as siteAdminUrl, createSiteAccess } from './siteAccess.js'
+import { createMonitorSession } from './monitorSession.js'
+import { createPreferencesController } from './themePreferences.js'
+import { displayRules, filterNodes, initialFilters } from './dashboardView.js'
+import { isServerOnline } from '../../src/frontend/utils/api.js'
+import { t, locale, resolveLocale } from './i18n.js'
 import * as data from './data.js'
 
-function app(savedPreferences = {}, systemLight = false) {
-  const requests = []
-  const storage = new Map()
-  const sockets = []
-  const sandbox = vm.createContext({
-    ...data, computed, nextTick, reactive, ref, watch,
-    onMounted() {}, onUnmounted() {},
-    window: { __AETHER_PREFERENCES__: savedPreferences, matchMedia: () => ({ matches: systemLight }), location: { hash: '#/' } },
-    document: { title: '测试监控站', querySelector: () => ({ href: 'https://example.invalid/site-icon.svg' }), documentElement: { dataset: {} }, body: { style: {} } }, localStorage: { setItem: (key, value) => storage.set(key, value) },
-    isServerOnline: () => true, DEFAULT_SITE_TITLE: 'Test',
-    createLiveSocket: (scope, handlers, index, ids) => {
-      sockets.push([...ids])
-      return { close() {} }
-    },
-    http: { get: path => new Promise(resolve => requests.push({ path, resolve })) },
+const source = readFileSync(new URL('./App.vue',import.meta.url),'utf8')
+const setup = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm,'')
+const bases=['https://first.example.invalid','https://second.example.invalid']
+const time=1_800_000_000_000
+function dashboard({hash='#/', failing=false, saved={}}={}) {
+  const storage=new Map(), requests=[], listeners=[], location={hash, origin:bases[0]}
+  const localStorage={getItem:key=>storage.get(key)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)}
+  const page={title:'Host title',documentElement:{dataset:{}},body:{style:{}},querySelector:()=>({href:bases[0]+'/custom-icon.png'}),addEventListener(){}}
+  const window={location,__AETHER_PREFERENCES__:saved,localStorage,matchMedia:()=>({matches:false,addEventListener(){}}),addEventListener(){}}
+  const fetch=async address=>{
+    const url=new URL(address), first=url.origin===bases[0]; requests.push(`${url.origin}${url.pathname}`)
+    const node={id:'shared',region:'CN',name:first?'North':'South',server_group:'Example',last_updated:time,net_in_speed:first?null:0,price:'11',currency:'$',billing_cycle:'month'}
+    if(url.pathname==='/api/config')return Response.json({is_public:true,authorization:true,default_language:'en',site_title:first?'Test Fleet':'Remote Fleet',preferred_theme:'dark'})
+    if(failing)return new Response('Temporary error',{status:500,headers:{'cf-ray':'local-test-ray'}})
+    if(url.pathname==='/api/servers')return Response.json({servers:[node],stats:{total:1,online:first?0:1,offline:first?1:0},sysConfig:{show_price:!first}})
+    if(url.pathname==='/api/server')return Response.json({...node,sysConfig:{show_price:false,show_tf:true,show_expire:true,show_three_net_details:true}})
+    if(url.pathname==='/api/history/all')return Response.json([])
+    throw Error('unexpected path')
+  }
+  const ctx=vm.createContext({window,document:page,localStorage, ...data, siteAdminUrl, locale,t,resolveLocale, displayRules,filterNodes,initialFilters, computed,defineAsyncComponent,h,nextTick,reactive,ref,watch,isServerOnline, DEFAULT_SITE_TITLE:'Default', getApiBases:()=>bases, onMounted:f=>listeners.push(f),onUnmounted(){}, getComputedStyle:()=>({backgroundImage:'none'}),
+    createSiteAccess:opts=>createSiteAccess({...opts,fetch,origin:bases[0],storage:localStorage}),
+    createPreferencesController:opts=>createPreferencesController({...opts}),
+    createMonitorSession:opts=>createMonitorSession({...opts,now:()=>time,isHidden:()=>false,timers:{setInterval(){return 1},clearInterval(){}},openSocket:()=>({close(){}})}),
   })
-  const script = readFileSync(new URL('./App.vue', import.meta.url), 'utf8').match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
-  vm.runInContext(script, sandbox)
-  vm.runInContext('nodes.value = [{ id: "a", name: "A" }]; detailId.value = "a";', sandbox)
-  return { requests, sockets, storage, run: code => vm.runInContext(code, sandbox) }
+  const run=s=>vm.runInContext(s,ctx); run(setup)
+  return { run, page, requests, async mount(){for(const f of listeners)await f(); await run('session.navigate(window.location.hash)');await nextTick()},
+    async render(pattern,bindings){const html=source.match(pattern)[0];const app=createSSRApp({setup:()=>run('({'+bindings+'})'),render:compile(html)});return renderToString(app)} }
 }
 
-test('首次渲染使用已保存的深色和纯色背景，无需等待站点配置', () => {
-  const harness = app({ appearance: 'dark', background: 'default', cardOpacity: 65 }, true)
-  assert.equal(harness.run('light.value'), false)
-  assert.equal(harness.run('prefs.background'), 'default')
-  assert.equal(harness.run('prefs.cardOpacity'), 65)
+test('首页采用宿主标题图标、语言和权威统计；同 ID 节点的显示开关按站区分', async()=>{
+  const a=dashboard();await a.mount()
+  const brand=await a.render(/<a href="#\/" class="brand"[\s\S]*?<\/a>/,'siteTitle,siteIcon,t')
+  assert.match(brand,/Test Fleet/);assert.match(brand,/custom-icon.png/);assert.equal(a.page.title,'Test Fleet');assert.equal(a.page.documentElement.lang,'en')
+  assert.deepEqual({...a.run('stats.value')},{total:2,online:1,offline:1});assert.equal(a.run('totalDownload.value'),0);assert.equal(a.run('downloadNodes.value.length'),1)
+  assert.deepEqual(Array.from(a.run('visibleNodes.value.map(n=>rulesFor(n).price)')),[false,true]);assert.equal(a.run('new Set(nodes.value.map(n=>n.key)).size'),2)
+  assert.equal(a.run('statusTabs.value[1].count'),1);a.run("filters.group='Example'");assert.equal(a.run('visibleNodes.value.length'),2)
 })
-
-test('个性化选项即时保存，恢复站点默认同时重置透明度、背景与动效', async () => {
-  const harness = app()
-  harness.run('config.value = { preferred_theme: "light", theme_options: { aether: { cardOpacity: 85, background: "default", motion: false } } }; prefs.cardOpacity = 55; prefs.background = "project"')
-  await nextTick()
-  assert.equal(JSON.parse(harness.storage.get('orbit-preferences')).cardOpacity, 55)
-  assert.equal(harness.run('themeStyle.value["--panel-opacity"]'), '55%')
-  harness.run('restorePreferences()')
-  await nextTick()
-  const saved = JSON.parse(harness.storage.get('orbit-preferences'))
-  assert.equal(saved.cardOpacity, 85)
-  assert.equal(saved.background, 'default')
-  assert.equal(saved.motion, false)
-  assert.equal(saved.appearance, 'light')
+test('打开第二站节点直链，后台指向该 Worker，保留隐藏价格、启用的网络与资产',async()=>{
+  const a=dashboard({hash:'#/server/shared?site=1'});await a.mount();assert.equal(a.run('adminUrl.value'),bases[1]+'/admin#/admin');assert.equal(a.run('state.detail.node.name'),'South');assert.equal(a.run('rulesBySite.value[detailSite.value.index].price'),false);assert.equal(a.run('rulesBySite.value[detailSite.value.index].network'),true);assert.ok(!a.requests.some(x=>x.startsWith(bases[0])||x.endsWith('/api/servers')))
 })
-
-test('页头显示站点标题与宿主图标，配置标题更新后同步显示', async () => {
-  const harness = app()
-  const source = readFileSync(new URL('./App.vue', import.meta.url), 'utf8')
-  const render = compile(source.match(/<a href="#\/" class="brand"[\s\S]*?<\/a>/)[0])
-  const component = () => createSSRApp({ setup: () => harness.run('({ siteTitle, siteIcon })'), render })
-  const initial = await renderToString(component())
-  assert.match(initial, /测试监控站/)
-  assert.match(initial, /src="https:\/\/example.invalid\/site-icon.svg"/)
-  harness.run('config.value = { site_title: "星港监控" }')
-  const updated = await renderToString(component())
-  assert.match(updated, /星港监控/)
-  assert.doesNotMatch(updated, /CF-Server-Monitor/)
-})
-
-test('同一节点连续刷新历史时，只提交最新请求，旧响应不覆盖数据或加载状态', async () => {
-  const harness = app()
-  const first = harness.run('loadHistory()')
-  const second = harness.run('loadHistory()')
-  harness.requests[0].resolve({ data: { id: 'a', name: 'Old' } })
-  harness.requests[1].resolve({ data: [{ timestamp: 1e12, cpu: 1 }] })
-  await first
-  assert.equal(harness.run('detailLoading.value'), true)
-  assert.equal(harness.run('history.value.length'), 0)
-  harness.requests[2].resolve({ data: { id: 'a', name: 'New' } })
-  harness.requests[3].resolve({ data: [{ timestamp: 1e12, cpu: 99 }] })
-  await second
-  assert.equal(harness.run('history.value[0].cpu'), 99)
-  assert.equal(harness.run('detailNode.value.name'), 'New')
-  assert.equal(harness.run('detailLoading.value'), false)
-
-  const third = harness.run('loadHistory()')
-  const fourth = harness.run('loadHistory()')
-  harness.requests[6].resolve({ data: { id: 'a', name: 'Latest' } })
-  harness.requests[7].resolve({ data: [{ timestamp: 1e12, cpu: 42 }] })
-  await fourth
-  harness.requests[4].resolve({ error: 'late failure', status: 500 })
-  harness.requests[5].resolve({ data: [] })
-  await third
-  assert.equal(harness.run('history.value[0].cpu'), 42)
-  assert.equal(harness.run('historyError.value'), '')
-})
-
-test('历史请求期间离开详情后，响应不会重新打开或更新详情', async () => {
-  const harness = app()
-  const pending = harness.run('loadHistory()')
-  harness.run('window.location.hash = "#/";')
-  await harness.run('hashChanged()')
-  harness.requests[0].resolve({ data: { id: 'a', name: 'Old' } })
-  harness.requests[1].resolve({ data: [{ timestamp: 1e12, cpu: 1 }] })
-  await pending
-  assert.equal(harness.run('detailId.value'), '')
-  assert.equal(harness.run('history.value.length'), 0)
-})
-
-test('无效的节点 URL 提供可见错误，不抛 URIError', async () => {
-  const harness = app()
-  harness.run('window.location.hash = "#/server/%E0%A4%A";')
-  await harness.run('hashChanged()')
-  assert.equal(harness.run('detailId.value'), '')
-  assert.equal(harness.run('error.value'), '节点链接格式无效')
-  assert.equal(harness.requests.length, 0)
-})
-
-test('下行汇总区分零值与缺失读数，并统计实际参与的节点', () => {
-  const harness = app()
-  harness.run('nodes.value = [{ net_in_speed: null }, {}]')
-  assert.equal(harness.run('totalDownload.value'), null)
-  harness.run('nodes.value.push({ net_in_speed: 0 })')
-  assert.equal(harness.run('totalDownload.value'), 0)
-  assert.equal(harness.run('downloadNodes.value.length'), 1)
-  harness.run('nodes.value.push({ net_in_speed: 1024 })')
-  assert.equal(harness.run('totalDownload.value'), 1024)
-})
-
-test('登录权限变更后，历史时间范围收敛到公开接口允许的 24 小时', async () => {
-  const harness = app()
-  harness.run('detailId.value = ""; config.value = { authorization: true, is_public: true }; historyHours.value = 168')
-  await nextTick()
-  harness.run('config.value = { authorization: false, is_public: true }')
-  await nextTick()
-  assert.equal(harness.run('historyHours.value'), 24)
-})
-test('接口返回 401 后清空旧节点和详情，避免继续展示授权快照', async () => {
-  const harness = app()
-  harness.run('config.value = { authorization: true }; snapshotAt.value = 1')
-  const request = harness.run('request("/api/servers")')
-  harness.requests[0].resolve({ error: 'Unauthorized', status: 401 })
-  await assert.rejects(request, /401/)
-  assert.equal(harness.run('nodes.value.length'), 0)
-  assert.equal(harness.run('detailId.value'), '')
-  assert.equal(harness.run('snapshotAt.value'), null)
-  assert.equal(harness.run('config.value.authorization'), false)
-})
-
-test('自动刷新尚未结束时点击重新连接，共用请求并在完成后重连一次', async () => {
-  const harness = app()
-  harness.run('snapshotAt.value = 1; error.value = "上次同步失败"; connect()')
-  const automatic = harness.run('refreshSnapshot()')
-  assert.equal(harness.run('reconnecting.value'), false)
-  const manual = harness.run('reconnect()')
-  assert.equal(harness.run('reconnecting.value'), true)
-  assert.deepEqual(harness.requests.map(request => request.path), ['/api/config'])
-  harness.requests[0].resolve({ data: { is_public: true } })
-  await new Promise(setImmediate)
-  assert.equal(harness.requests[1].path, '/api/servers')
-  harness.requests[1].resolve({ data: { servers: [{ id: 'a', name: 'A' }], sysConfig: {} } })
-  await Promise.all([automatic, manual])
-  assert.deepEqual(harness.sockets, [['a'], ['a']])
-  assert.equal(harness.run('reconnecting.value'), false)
-  assert.equal(harness.run('error.value'), '')
-})
-
-test('手动重连失败显示对应接口并保留已加载数据，下一次可以恢复', async () => {
-  const harness = app()
-  harness.run('snapshotAt.value = 1; error.value = "上次同步失败"; connect()')
-  const failed = harness.run('reconnect()')
-  harness.requests[0].resolve({ error: 'Internal Server Error', status: 500, rayId: 'test-ray-id' })
-  await failed
-  assert.match(harness.run('error.value'), /\/api\/config.*500.*test-ray-id/)
-  assert.equal(harness.run('nodes.value.length'), 1)
-  assert.equal(harness.run('refreshing.value'), false)
-  assert.equal(harness.sockets.length, 1)
-
-  const recovered = harness.run('reconnect()')
-  assert.equal(harness.run('refreshing.value'), true)
-  harness.requests[1].resolve({ data: { is_public: true } })
-  await new Promise(setImmediate)
-  harness.requests[2].resolve({ data: { servers: [{ id: 'a', name: 'A' }], sysConfig: {} } })
-  await recovered
-  assert.equal(harness.run('refreshing.value'), false)
-  assert.equal(harness.run('error.value'), '')
-  assert.equal(harness.sockets.length, 2)
+test('接口返回 HTML 500 时错误保留接口与 Ray ID；无 stats 或畸形 hash 不影响页面渲染',async()=>{
+  const a=dashboard({failing:true});await a.mount();assert.match(a.run('state.error'),/\/api\/servers.*500.*local-test-ray/);assert.equal(a.run('statusTabs.value[0].count'),'—')
+  const b=dashboard({hash:'#/server/%FF%'});await b.mount();assert.equal(b.run('state.error'),'节点链接格式无效');assert.equal(b.requests.length,0)
 })

@@ -1,0 +1,43 @@
+name: Publish theme
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: publish-theme
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAGES_PUBLISH_TOKEN || github.token }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Build same-origin install for existing URLs
+        env:
+          API_BASE: ''
+          TITLE: ''
+          BACKGROUND_IMAGE: ''
+          CSP_API: ''
+          CSP_STATIC: ''
+        run: npm run build -- --outDir "$RUNNER_TEMP/install"
+      - name: Build Pages site
+        env:
+          API_BASE: ${{ secrets.API_BASE }}
+          TITLE: ${{ secrets.TITLE }}
+          BACKGROUND_IMAGE: ${{ secrets.BACKGROUND_IMAGE }}
+          CSP_API: ${{ secrets.CSP_API }}
+          CSP_STATIC: ${{ secrets.CSP_STATIC }}
+        run: npm run build -- --outDir "$RUNNER_TEMP/pages"
+      - name: Append both artifacts to their own histories
+        run: bash scripts/publish-theme.sh "$RUNNER_TEMP/pages" "$RUNNER_TEMP/install"

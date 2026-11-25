@@ -2,7 +2,7 @@
 
 ## CF-Server-Monitor
 
-来源：[huilang-me/CF-Server-Monitor](https://github.com/huilang-me/CF-Server-Monitor)，当前主题基于本地 2.8.7 接口快照开发。
+来源：[huilang-me/CF-Server-Monitor](https://github.com/huilang-me/CF-Server-Monitor)。本次对照的[主题提示词](https://github.com/huilang-me/CF-Server-Monitor/blob/1e4931fbebb8dc82f113cd2da80b962fab646a3b/theme-ai-prompt.md)和 [API 说明](https://github.com/huilang-me/CF-Server-Monitor/blob/1e4931fbebb8dc82f113cd2da80b962fab646a3b/theme-develop.md)固定到同一提交。
 
 复用内容：`src/frontend/utils/` 下的 API、HTTP、配置、状态与账单工具，`src/frontend/router/adminEntryUrl.js`，`src/utils/traffic.js`，开发用国旗、系统图标、国家轮廓，以及本地示例的节点定义。
 
@@ -24,6 +24,6 @@
 
 ## 依赖与外部服务
 
-Vue、Vite、ws 保留其 npm 包中的许可。IPQuery 是浏览器调用的网络数据服务，不是随主题分发的数据集；查询会发送访客出口 IP。
+Vue、Vite、ws 保留其 npm 包中的许可。[IPQuery](https://ipquery.io/) 是可选的浏览器查询服务，不是随主题分发的数据集。进入页面或展开面板时不会发起检测；访客阅读说明并主动点击后，浏览器才尝试读取宿主的 Cloudflare trace，再向 IPQuery 发送出口 IP。风险分与网络归属由 IPQuery 提供。站点可设置 `theme_options.aether.visitorLookup: false` 禁用此入口；本地虚构示例不向 IPQuery 发请求。
 
 文档中的截图均使用虚构演示节点，Aether 标志为本项目绘制的 SVG。

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeNode, nodeArea, bytes, usage, daysLeft, expiry, probeValue, monthlyCosts, chartSegments, trafficBytes, quota, issues, preferences, flag, uptime, timestamp, routes, latencyClass } from './data.js'
+import { normalizeNode, nodeArea, bytes, usage, daysLeft, expiry, probeValue, monthlyCosts, chartSegments, trafficBytes, quota, issues, preferences, flag, uptime, timestamp, routes, latencyClass, activeProbes, hasProbeReading, historyChartRows, price, regionName } from './data.js'
+import { locale } from './i18n.js'
 
 test('中国地区输入在节点入口统一为 CN，国家与大区显示正确', () => {
   for (const region of ['CN', 'cn', ' CN ', 'CHN', 'China', '中国', '中华人民共和国']) {
@@ -57,6 +58,8 @@ test('旧主题选项仍有效，新外观数值只在读取配置时限制到�
   assert.equal(old.globe, false)
   assert.equal(old.background, 'project')
   assert.equal(old.cardOpacity, 100)
+  assert.equal(old.visitorLookup, true)
+  assert.equal(preferences({ visitorLookup: false }).visitorLookup, false)
   const custom = preferences({ background: 'default', cardOpacity: 65, panelBlur: 8 })
   assert.equal(custom.background, 'default')
   assert.equal(custom.cardOpacity, 65)
@@ -70,13 +73,47 @@ test('旧主题选项仍有效，新外观数值只在读取配置时限制到�
 test('零值、禁用和缺失探针保持不同语义', () => {
   const node = normalizeNode({ cpu: '0', ping_ct: 'false', loss_ct: false, ping_cu: null, loss_cu: '0' })
   assert.equal(node.cpu, 0)
-  assert.equal(probeValue(node, 'ct', 'ping', true), '未启用')
-  assert.equal(probeValue(node, 'cu', 'ping', true), '未上报')
+  assert.equal(probeValue(node, 'ct', 'ping', true), '')
+  assert.equal(probeValue(node, 'bd', 'ping', false), '')
+  assert.equal(probeValue(node, 'cu', 'ping', true), '超时')
   assert.equal(probeValue(node, 'cu', 'loss', true), '0%')
   assert.equal(probeValue(node, 'cu', 'loss', false), '离线')
   assert.equal(usage(null, 4096), null)
   assert.equal(usage(0, 4096), 0)
   assert.equal(usage(0, 0), null)
+})
+test('线路只按所选节点的实测字段和这段历史选取，不把显式禁用、缺失、其他站点的探测混入', () => {
+  const node = normalizeNode({ custom_ct: '0', ping_ct: 40, loss_ct: 80, ping_cu: false, loss_cu: 'false', ping_cm: undefined, custom_bd: '', ping_bd: null, loss_bd: 100, loss_node_1: 0 })
+  const config = { custom_bd_name: '本站线路', node_1_name: '零丢包' }
+  assert.deepEqual(activeProbes([node], config), [{ key: 'bd', name: '本站线路' }, { key: 'node_1', name: '零丢包' }])
+  assert.equal(probeValue(node, 'bd', 'ping', true), '超时')
+  assert.equal(probeValue(node, 'node_1', 'loss', true), '0%')
+  assert.equal(hasProbeReading(node, 'node_1', 'ping'), false)
+  assert.deepEqual(issues(normalizeNode({ custom_ct: '0', loss_ct: 99 }), true, { network: true }, Date.now()), [])
+  const history = [{ ping_ct: 51, ping_node_2: null, loss_node_3: false, ping_node_4: 0 }]
+  assert.deepEqual(activeProbes([node], config, history, 'ping').map(probe => probe.key), ['ct', 'bd', 'node_2', 'node_4'])
+  assert.deepEqual(activeProbes([node], config, history, 'loss').map(probe => probe.key), ['bd', 'node_1'])
+  assert.deepEqual(activeProbes([{ node_1: 'configured.example' }]), [])
+})
+test('磁盘曲线只从 disk 取值，保留真实 0、不采用平铺别名或补出未报告的数值', () => {
+  const raw = [{ disk: { read_iops: 0, write_iops: 9 }, disk_read_iops: 300 }, { disk: { read_iops: 33, write_iops: 0 } }, { disk_read_iops: 999, disk_write_iops: 999 }]
+  const start = 1e12
+  const rows = historyChartRows(raw.map((row, index) => normalizeNode({ ...row, timestamp: start + index * 2000 })))
+  assert.deepEqual(rows.map(row => [row.disk_read_iops, row.disk_write_iops]), [[0, 9], [33, 0], [null, null]])
+  assert.equal(chartSegments(rows, 'disk_read_iops', start, start + 10000).count, 2)
+  assert.deepEqual([rows[0].ram_percent, rows[0].net_down, rows[0].net_up], [null, null, null])
+})
+test('英文显示使用站点语言；手动标签和站主自定义的探测名保持原文', () => {
+  const original = locale.value
+  try {
+    locale.value = 'en'
+    assert.equal(regionName('JP'), 'Japan')
+    assert.equal(nodeArea({ region: 'US', name: 'San Jose' }), 'US West')
+    assert.equal(probeValue({ ping_ct: null }, 'ct', 'ping', true), 'Timeout')
+    assert.deepEqual(activeProbes([{ ping_ct: 0, loss_node_1: 0 }], { custom_ct_name: '电信', node_1_name: '自建线路' }).map(probe => probe.name), ['China Telecom', '自建线路'])
+    assert.deepEqual(routes({ tags: '手动标签' }), ['手动标签'])
+    assert.deepEqual(['0', '-1', ' '].map(value => price({ price: value })), ['Free', 'Free', 'Not set'])
+  } finally { locale.value = original }
 })
 test('容量和流量按接口单位计算，未设置额度不当作零容量', () => {
   assert.equal(bytes(1024 ** 3), '1.0 GB')
@@ -100,6 +137,7 @@ test('独立静态托管时，国旗从配置的 API 源站加载', () => {
   globalThis.window = { __APP_API_BASES__: ['https://monitor.example.com'] }
   try {
     assert.equal(flag('JP'), 'https://monitor.example.com/flags/jp.svg')
+    assert.equal(flag('JP', 'https://second.example'), 'https://second.example/flags/jp.svg')
     assert.equal(flag('ZZ'), null)
   } finally { globalThis.window = previous }
 })
