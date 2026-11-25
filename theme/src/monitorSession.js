@@ -1,13 +1,21 @@
 import { reactive } from 'vue'
-import { createLiveSocket, forEachLiveSample } from '../../src/frontend/utils/api.js'
+import { createLiveSocket, forEachLiveSample, isServerOnline } from '../../src/frontend/utils/api.js'
 import { normalizeTimestamp } from '../../src/frontend/utils/time.js'
 import { normalizeNode } from './data.js'
+import { hasVerificationWidget } from './siteAccess.js'
 
 export const HISTORY_HOURS = [0.167, 0.5, 1, 6, 12, 24, 48, 96, 168]
 const defaultHours = HISTORY_HOURS[0]
 const emptyDetail = () => ({ id: '', site: 0, base: '', node: null, hours: defaultHours, rows: [], end: null, loading: false, error: '' })
 const publicIdentity = (site, id) => ({ id, site: site.index, source: site.base, apiBase: site.base, key: `${site.base}/${id}` })
 const statFields = ['total', 'online', 'offline']
+
+function snapshotPresence(servers, stats) {
+  if (stats.total !== servers.length || stats.online + stats.offline !== stats.total || !Number.isInteger(stats.online) || stats.online < 0 || stats.online > stats.total) return null
+  const ranked = servers.map(node => ({ id: node.id, updated: normalizeTimestamp(node.last_updated) })).sort((first, second) => (second.updated ?? 0) - (first.updated ?? 0))
+  if (stats.online && (ranked[stats.online - 1].updated === null || ranked[stats.online - 1].updated === ranked[stats.online]?.updated)) return null
+  return new Map(ranked.map(({ id, updated }, index) => [id, { updated, online: index < stats.online }]))
+}
 
 function readRoute(hash, sites) {
   const path = hash.replace(/^#/, '')
@@ -41,7 +49,7 @@ function rowIndex(rows, timestamp) {
 }
 
 export function createMonitorSession({ bases, access, openSocket = createLiveSocket, now = Date.now, isHidden = () => document.hidden, timers = globalThis }) {
-  const sites = reactive(bases.map((base, index) => ({ base, index, config: null, sysConfig: {}, nodes: [], stats: null, blocked: null, paused: false, error: '', loading: false, snapshotAt: null })))
+  const sites = reactive(bases.map((base, index) => ({ base, index, config: null, sysConfig: {}, nodes: [], stats: null, presence: null, clockOffset: null, blocked: null, paused: false, error: '', loading: false, snapshotAt: null })))
   const runtimes = sites.map(() => ({ generation: 0, configured: null, listTask: null, loaded: false, needsList: false, mode: '', sockets: [], pending: new Map(), stamps: new Map() }))
   const state = reactive({
     sites, clock: now(), detail: emptyDetail(), routeError: '',
@@ -57,6 +65,33 @@ export function createMonitorSession({ bases, access, openSocket = createLiveSoc
   let route, visible = !isHidden(), disposed = false, clockTimer = null, routeVersion = 0, rangeVersion = 0
   const liveHistory = new Map(), pendingHistory = new Map()
   let activeLoad = null, detailReady = false
+
+  async function readSnapshot(site, path) {
+    let offset = null
+    const data = await access.get(site.base, path, { onResponseDate: time => { offset = time - now() } })
+    if (offset === null) {
+      const report = data.latestReportUpdates?.find(update => normalizeTimestamp(update?.reportTs) !== null && Number.isFinite(update.reportAgeMs) && update.reportAgeMs >= 0)
+      if (report) offset = normalizeTimestamp(report.reportTs) + report.reportAgeMs - now()
+    }
+    return { data, offset }
+  }
+  function online(node) {
+    const site = sites[node.site]
+    return site.presence?.get(node.id)?.online ?? isServerOnline(node, state.clock + (site.clockOffset ?? 0))
+  }
+  function updatePresence(site) {
+    if (site.clockOffset === null || !site.presence || state.clock <= site.snapshotAt) return
+    let delta = 0
+    for (const node of site.nodes) {
+      const previous = site.presence.get(node.id)
+      const updated = normalizeTimestamp(node.last_updated)
+      const current = isServerOnline(node, state.clock + site.clockOffset) && (previous.online || updated > (previous.updated ?? 0))
+      if (current === previous.online) continue
+      site.presence.set(node.id, { updated, online: current })
+      delta += current ? 1 : -1
+    }
+    if (delta) site.stats = { ...site.stats, online: site.stats.online + delta, offline: site.stats.offline - delta }
+  }
 
   function stopSockets(runtime) {
     runtime.mode = ''
@@ -102,7 +137,7 @@ export function createMonitorSession({ bases, access, openSocket = createLiveSoc
     site.loading = false
     site.error = (typeof error === 'string' ? error : error?.message) || (status === 401 ? '需要登录' : '需要站点验证')
     if (site.config) site.config = status === 401 ? { ...site.config, authorization: false } : { ...site.config, verified: false, verificationPending: false }
-    Object.assign(site, { nodes: [], stats: null, snapshotAt: null, sysConfig: {} })
+    Object.assign(site, { nodes: [], stats: null, presence: null, snapshotAt: null, sysConfig: {} })
     if (state.detail.id && site.index === state.detail.site) {
       rangeVersion++
       detailReady = false
@@ -171,6 +206,7 @@ export function createMonitorSession({ bases, access, openSocket = createLiveSoc
       }
       runtime.pending.clear()
     }
+    for (const site of sites) updatePresence(site)
   }
   function clockOn() { if (clockTimer === null && visible && !disposed) clockTimer = timers.setInterval(flush, 1000) }
   function clockOff() { timers.clearInterval(clockTimer); clockTimer = null }
@@ -189,6 +225,7 @@ export function createMonitorSession({ bases, access, openSocket = createLiveSoc
     const valid = () => active(site) && runtime.mode === scope
     const handlers = {
       base: site.base, timeoutMinutes: site.config.frontend_ws_timeout_minutes, getToken: () => access.wsToken?.(site.base), canConnect: valid,
+      onServerTime: time => { if (valid() && site.clockOffset === null) site.clockOffset = time - now() },
       onUpdate: update => { if (valid()) record(site, update) },
       onTimeout: () => { if (valid()) pause(site, '实时连接已达站点时限') },
       onStatus: ({ terminal, reason }) => { if (terminal && valid()) pause(site, reason === 'policy' ? '站点拒绝实时订阅' : '实时连接已停止') },
@@ -223,13 +260,15 @@ export function createMonitorSession({ bases, access, openSocket = createLiveSoc
     const task = (async () => {
       try {
         if (!await ready(site) || !valid()) return
-        const result = await access.get(site.base, '/api/servers')
+        const { data: result, offset } = await readSnapshot(site, '/api/servers')
         if (!valid()) return
         if (!Array.isArray(result.servers) || !statFields.every(field => Number.isFinite(result.stats?.[field]))) throw new Error('服务器列表或汇总数据无效')
         const ids = new Set(result.servers.map(node => node.id))
         site.nodes = result.servers.map(node => applySnapshot(site, node))
         for (const id of runtime.stamps.keys()) if (!ids.has(id)) runtime.stamps.delete(id)
         site.stats = result.stats
+        site.presence = snapshotPresence(result.servers, result.stats)
+        if (offset !== null) site.clockOffset = offset
         site.sysConfig = { ...site.config?.sysConfig, ...result.sysConfig }
         site.snapshotAt = now()
         site.error = ''
@@ -250,6 +289,7 @@ export function createMonitorSession({ bases, access, openSocket = createLiveSoc
     runtime.needsList = true
     site.nodes = site.nodes.filter(node => node.id !== id)
     site.stats = null
+    site.presence = null
     site.snapshotAt = null
     liveHistory.clear()
     pendingHistory.clear()
@@ -272,7 +312,8 @@ export function createMonitorSession({ bases, access, openSocket = createLiveSoc
       pendingHistory.clear()
     } catch (error) {
       if (!valid()) return
-      if ((error.status === 401 || error.status === 403) && !error.staleCredentials) block(site.base, error.status, error)
+      if (error.status === 404) clearMissing(site, id, error)
+      else if ((error.status === 401 || error.status === 403) && !error.staleCredentials) block(site.base, error.status, error)
       else detail.error = error.message
     } finally { if (valid()) detail.loading = false }
   }
@@ -284,9 +325,10 @@ export function createMonitorSession({ bases, access, openSocket = createLiveSoc
     detail.error = ''
     try {
       if (!await ready(site) || !valid()) return
-      const server = await access.get(site.base, `/api/server?id=${encodeURIComponent(id)}`)
+      const { data: server, offset } = await readSnapshot(site, `/api/server?id=${encodeURIComponent(id)}`)
       if (!valid()) return
       if (server.id !== id) throw new Error('节点返回的标识与请求不符')
+      if (offset !== null) site.clockOffset = offset
       detail.node = applySnapshot(site, server, true)
       detailReady = true
       site.sysConfig = { ...site.sysConfig, ...server.sysConfig }
@@ -357,9 +399,14 @@ export function createMonitorSession({ bases, access, openSocket = createLiveSoc
     if (active(site) && detailReady) return history(site, route.id)
   }
   function retry(base = route ? sites[route.site].base : undefined) {
-    const targets = sites.filter(site => (!base || site.base === base) && !site.blocked && (site.error || site.paused || (route?.site === site.index && state.detail.error)))
+    const targets = sites.filter(site => (!base || site.base === base) && (site.blocked === 403 ? !hasVerificationWidget(site.config) : !site.blocked && (site.error || site.paused || (route?.site === site.index && state.detail.error))))
     return Promise.all(targets.map(site => {
       const paused = site.paused
+      if (site.blocked === 403) {
+        access.invalidateConfig(site.base)
+        site.config = null
+        site.blocked = null
+      }
       site.paused = false; site.error = ''
       if (route?.site === site.index && detailReady && active(site)) {
         if (paused) subscribe(site, route.id, [])
@@ -379,5 +426,5 @@ export function createMonitorSession({ bases, access, openSocket = createLiveSoc
   }
   function dispose() { disposed = true; clockOff(); for (const runtime of runtimes) stopSockets(runtime) }
   function detailHash(node) { return `#/server/${encodeURIComponent(node.id)}${sites.length > 1 ? `?site=${node.site}` : ''}` }
-  return { state, navigate, setVisible, setHours, retry, verified, block, dispose, detailHash }
+  return { state, online, navigate, setVisible, setHours, retry, verified, block, dispose, detailHash }
 }

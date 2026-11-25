@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -32,13 +32,17 @@ test('发布两个独立构建到本地 bare 仓库，各分支保留每次源�
   git('commit', '--allow-empty', '-m', 'Previous install')
   const previous = git('rev-parse', 'HEAD')
   git('push', 'origin', 'HEAD:refs/heads/build')
-  let parents = { build: previous, dist: previous }
-  const sourceShas = []
-  for (const subject of ['首次发布', '仅更新文档也保留源码说明']) {
+  const parents = { build: previous, dist: previous }
+  function pushSource(subject) {
     git('commit', '--allow-empty', '-m', subject, '-m', 'Source body with a second paragraph.')
     git('push', 'origin', 'main')
-    const source = git('rev-parse', 'HEAD')
-    sourceShas.push(source)
+    return git('rev-parse', 'HEAD')
+  }
+  const subjects = ['首次发布', '仅更新文档也保留源码说明']
+  const sourceShas = subjects.map(pushSource)
+  for (const [index, subject] of subjects.entries()) {
+    const source = sourceShas[index]
+    git('switch', '--detach', source)
     publish()
     for (const branch of ['dist', 'build']) {
       assert.equal(inRemote('rev-parse', `${branch}^`), parents[branch])
@@ -54,7 +58,27 @@ test('发布两个独立构建到本地 bare 仓库，各分支保留每次源�
   git('switch', '--detach', sourceShas[0])
   publish()
   for (const [branch, tip] of Object.entries(parents)) assert.equal(inRemote('rev-parse', branch), tip)
+  git('switch', 'main')
+  const lateSource = pushSource('较晚完成的第三次构建')
+  const latestSource = pushSource('先完成的第四次构建')
+  publish()
+  const latestTips = Object.fromEntries(['dist', 'build'].map(branch => [branch, inRemote('rev-parse', branch)]))
+  git('switch', '--detach', lateSource)
+  for (const path of [pages, install]) appendFileSync(join(path, 'index.html'), '\n<!-- older artifact -->\n')
+  publish()
+  for (const [branch, latestTip] of Object.entries(latestTips)) {
+    assert.equal(inRemote('rev-parse', `${branch}^1`), latestTip)
+    assert.equal(inRemote('rev-parse', `${branch}^{tree}`), inRemote('rev-parse', `${latestTip}^{tree}`))
+    assert.equal(inRemote('log', '-1', '--format=%(trailers:key=Live-Source,valueonly)', branch), latestSource)
+    assert.equal(inRemote('log', '-1', '--format=%(trailers:key=Source,valueonly)', `${branch}^2`), lateSource)
+    assert.match(inRemote('show', `${branch}^2:index.html`), /older artifact/)
+    parents[branch] = inRemote('rev-parse', branch)
+  }
+  publish()
+  git('commit', '--allow-empty', '-m', 'Not in remote main')
+  assert.throws(publish, /not in the history of origin\/main/)
+  for (const [branch, tip] of Object.entries(parents)) assert.equal(inRemote('rev-parse', branch), tip)
   const pushes = readFileSync(trace, 'utf8').trim().split('\n').map(line => JSON.parse(line)).filter(event => event.event === 'start' && event.argv[1] === 'push')
-  assert.equal(pushes.length, 2)
+  assert.equal(pushes.length, 4)
   for (const { argv } of pushes) assert.ok(!argv.some(arg => arg === '-f' || arg.startsWith('--force') || arg.startsWith('+')), 'publication must not force-push')
 })

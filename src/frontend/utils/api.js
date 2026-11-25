@@ -79,6 +79,11 @@ export function createLiveSocket(scope, handlers = {}, apiIndex = 0, ids = [], p
       if (socket !== current || stopped) return
       let message
       try { message = JSON.parse(event.data) } catch { return }
+      if (message?.type === 'hello') {
+        const time = normalizeTimestamp(message.ts)
+        if (time !== null) handlers.onServerTime?.(time)
+        return
+      }
       if (message?.type !== 'batchUpdate' || !Array.isArray(message.updates)) return
       forEachLiveSample(message.updates, update => { if (allowed.has(update.serverId)) handlers.onUpdate?.(update) })
     })

@@ -42,13 +42,15 @@ test('all 发送本站 ID；具体节点仅用 URL 订阅；JWT 只取当前跨�
 })
 
 test('回调保留样本的真实时间，兼容三种载体，忽略其他节点和非数据帧', () => {
-  const app = transport(), socket = app.sockets[0]; socket.emit('open')
+  const serverTimes = [], app = transport('all', { onServerTime: time => serverTimes.push(time) }), socket = app.sockets[0]; socket.emit('open')
   const ts = 1800000000000
+  socket.emit('message', { data: JSON.stringify({ type: 'hello', ts }) })
   socket.emit('message', { data: JSON.stringify({ type: 'batchUpdate', updates: [
     { serverId: 'one', samples: [{ ts, data: { cpu: 50 } }, { ts: ts - 2000, payload: { cpu: 10 } }, { ts: ts - 1000, metrics: { loss_ct: 0 } }] },
     { serverId: 'other', samples: [{ ts, data: { cpu: 20 } }] },
   ] }) }); socket.emit('message', { data: '{' })
   assert.deepEqual(app.samples.map(sample => [sample.ts, sample.data]), [[ts, { cpu: 50 }], [ts - 2000, { cpu: 10 }], [ts - 1000, { loss_ct: 0 }]])
+  assert.deepEqual(serverTimes, [ts])
 })
 
 test('退避期间 close 能取消全部拨号；重新检查可见性，连续失败有上限', () => {

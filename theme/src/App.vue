@@ -1,6 +1,5 @@
 <script setup>
 import { computed, defineAsyncComponent, h, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { isServerOnline } from '../../src/frontend/utils/api.js'
 import { getApiBases } from '../../src/frontend/utils/config.js'
 import { DEFAULT_SITE_TITLE } from '../../src/frontend/utils/constants.js'
 import { activeProbes, regionName, flag, routes, usage, percent, speed, daysLeft, issues } from './data.js'
@@ -33,6 +32,7 @@ const access = createSiteAccess({
 const session = createMonitorSession({bases, access})
 const {state} = session
 const primary = computed(() => state.sites[0])
+const statusSites = computed(() => state.detail.id ? [] : state.sites)
 const detailSite = computed(() => state.sites[state.detail.site] || primary.value)
 const config = computed(() => (state.detail.id ? detailSite.value : primary.value)?.config || {})
 const siteTitle = computed(() => config.value.site_title || initialTitle)
@@ -56,7 +56,7 @@ const settingsBySite = computed(() => state.sites.map(siteSettings))
 const rulesBySite = computed(() => settingsBySite.value.map(displayRules))
 const settingsFor = node => settingsBySite.value[node.site]
 const rulesFor = node => rulesBySite.value[node.site]
-const online = n => isServerOnline(n, clock.value)
+const online = session.online
 const show = computed(() => Object.fromEntries(['price','expire','network','traffic'].map(k=>[k,rulesBySite.value.some(s=>s[k])])))
 const effectiveView = computed(() => prefs.view === 'network' && !show.value.network ? 'card' : prefs.view)
 const filters = reactive({...initialFilters}), sort = ref('默认排序'), filtersOpen = ref(false)
@@ -85,7 +85,7 @@ async function saveDefaults() {
   if (!primary.value.config?.authorization || saving.value) return
   saving.value=true; notice.value=''
   try { await access.save(bases[0],{...prefs}); settings.clearOverrides(); notice.value=t('已保存为站点默认') }
-  catch (e) { notice.value=e.message; if (e.status===401 || e.status===403) { session.block(bases[0],e.status,e); await closeSettings() } }
+  catch (e) { notice.value=e.message; if (!e.staleCredentials && (e.status===401 || e.status===403)) { session.block(bases[0],e.status,e); await closeSettings() } }
   finally { saving.value=false }
 }
 const restorePreferences = () => { settings.clearOverrides(); notice.value='' }
@@ -110,7 +110,7 @@ onUnmounted(()=>{session.dispose();document.removeEventListener('visibilitychang
         <a href="#/" class="brand" :aria-label="t('监控首页')"><img :src="siteIcon" class="brand-icon" alt="" /><strong class="project-brand" :title="siteTitle">{{ siteTitle }}</strong></a>
         <nav class="topbar-actions" :aria-label="t('页面操作')">
           <button class="icon-button" :aria-label="t('主题设置')" :title="t('主题设置')" @click="openSettings"><UiIcon name="palette" /></button>
-          <a :href="adminUrl" class="icon-button admin-link" :aria-label="t('管理后台')" :title="t('管理后台')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg></a>
+          <a :href="adminUrl" class="icon-button admin-link" :aria-label="t('管理后台')" :title="t('管理后台')"><UiIcon name="settings"/></a>
           <button class="icon-button theme-button" :aria-label="t(light ? '切换深色模式' : '切换浅色模式')" :title="t(light ? '切换深色模式' : '切换浅色模式')" @click="prefs.appearance = light ? 'dark' : 'light'"><svg viewBox="0 0 24 24" aria-hidden="true"><path v-if="light" d="M20.5 13A8.5 8.5 0 0 1 11 3.5 8.5 8.5 0 1 0 20.5 13Z" /><template v-else><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></template></svg></button>
         </nav>
       </header>
@@ -147,7 +147,7 @@ onUnmounted(()=>{session.dispose();document.removeEventListener('visibilitychang
         </div>
         <div v-if="activeFilters.length" class="active-filters"><span> {{ t('已筛选') }} </span><button v-for="field in activeFilters" :key="field.key" :aria-label="t('清除筛选：{name}',{name:t(field.label)})" @click="filters[field.key] = initialFilters[field.key]">{{ t(field.label) }}：{{ field.key === 'region' ? regionName(filters[field.key]) : ['issue','protocol'].includes(field.key)?t(filters[field.key]):filters[field.key] }}<UiIcon name="close" /></button><button class="clear-all" @click="clearFilters"> {{ t('重置') }} </button></div>
         <p v-if="state.error && !state.sites.some(site=>site.error===state.error || site.paused || site.blocked)" class="error-state" role="status">{{ t(state.error) }}</p>
-        <SiteStatus v-for="site in state.sites" :key="site.base" :site="site" :multi="bases.length>1" :access="access" :light="light" @retry="session.retry" @verified="session.verified"/>
+        <SiteStatus v-for="site in statusSites" :key="site.base" :site="site" :multi="bases.length>1" :access="access" :light="light" @retry="session.retry" @verified="session.verified"/>
         <div v-if="loading && !snapshotAt" class="loading-grid" role="status" :aria-label="t('正在读取服务器数据')"><div v-for="n in 3" :key="n" class="node-skeleton"><i/><i/><i/><i/></div></div>
         <div v-else-if="!visibleNodes.length && !state.error && !state.sites.some(s=>s.error||s.blocked||s.paused) && !state.detail.id" class="empty-state"><UiIcon name="search" class="empty-symbol"/><strong>{{ t(nodes.length?'没有符合条件的节点':'还没有服务器节点') }}</strong><button v-if="nodes.length" @click="clearFilters">{{ t('清除筛选') }}</button><a v-else :href="adminUrl">{{ t('管理后台') }}<UiIcon name="external"/></a></div>
         <div v-else-if="effectiveView==='card'" class="node-grid"><NodeCard v-for="node in visibleNodes" :key="node.key" :node="node" :online="online(node)" :full="prefs.layout==='full'" :show="rulesFor(node)" :probes="activeProbes([node],settingsFor(node))" :now="clock" @open="openDetail"/></div>

@@ -1,4 +1,4 @@
-export async function requestJson(fetcher, base, path, { headers = {}, body } = {}) {
+export async function requestJson(fetcher, base, path, { headers = {}, body, onResponseDate } = {}) {
   const endpoint = path.split('?')[0]
   let response
   try {
@@ -15,6 +15,10 @@ export async function requestJson(fetcher, base, path, { headers = {}, body } = 
     const rayId = response.status >= 500 && response.headers.get('cf-ray')
     const reason = data?.error || data?.message || response.statusText
     throw Object.assign(new Error(`${endpoint} (${response.status}): ${reason}${rayId ? ` · Ray ID ${rayId}` : ''}`), { status: response.status, base, path })
+  }
+  if (onResponseDate) {
+    const date = Date.parse(response.headers.get('date'))
+    if (Number.isFinite(date)) onResponseDate(date)
   }
   try {
     const result = await response.json()

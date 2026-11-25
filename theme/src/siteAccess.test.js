@@ -1,12 +1,39 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createSiteAccess, needsVerification } from './siteAccess.js'
+import { createSiteAccess, needsVerification, sourceViewUrl } from './siteAccess.js'
 import { createMonitorSession } from './monitorSession.js'
 import { STORAGE } from '../../src/frontend/utils/constants.js'
 
 const primary = 'https://primary.example.test'
 const secondary = 'https://other.example.test'
 const publicSite = { is_public: true, authorization: false, turnstile_enabled: false, verified: false, theme_options: {} }
+
+test('跨域受限站点可在源站查看相同节点：仅携带节点 ID，不沿用多站参数或登录信息', () => {
+  const staticOrigin = 'https://theme.example.test'
+  assert.equal(sourceViewUrl(secondary, '', staticOrigin), `${secondary}/#/`)
+  assert.equal(sourceViewUrl(`${secondary}/?site=1#old`, 'node:42', staticOrigin), `${secondary}/#/server/node%3A42`)
+  assert.equal(sourceViewUrl(primary, 'node:42', primary), '')
+})
+
+test('静态页首次跳源站登录，返回或刷新后留在页面；每个标签页与 Worker 单独计数', async () => {
+  const persisted = new Map()
+  const tabStorage = { getItem: key => persisted.get(key), setItem: (key, value) => persisted.set(key, value), removeItem: key => persisted.delete(key) }
+  const options = { origin: 'https://theme.example.test', tabStorage, shouldRedirect: () => true }
+  const privateSite = () => Response.json({ ...publicSite, is_public: false })
+  const firstVisit = fixture(privateSite, options)
+  await firstVisit.access.config(primary)
+  assert.deepEqual(firstVisit.navigations, [`${primary}/admin#/admin`])
+  const backOrReload = fixture(privateSite, options)
+  await backOrReload.access.config(primary)
+  assert.deepEqual(backOrReload.navigations, [])
+  await backOrReload.access.config(secondary)
+  assert.deepEqual(backOrReload.navigations, [`${secondary}/admin#/admin`])
+  assert.equal(persisted.size, 2)
+  assert.deepEqual([...new Set(persisted.values())], ['1'])
+  const otherTab = fixture(privateSite, { ...options, tabStorage: { getItem: () => null, setItem() {} } })
+  await otherTab.access.config(primary)
+  assert.deepEqual(otherTab.navigations, [`${primary}/admin#/admin`])
+})
 
 function fixture(handle, options = {}) {
   const entries = new Map()
@@ -21,6 +48,60 @@ function fixture(handle, options = {}) {
     } })
   return { access, storage, requests, navigations, blocked }
 }
+
+function connectedFixture(handle, bases = [primary]) {
+  const harness = fixture(handle, {
+    onBlocked: (base, status, error) => monitor.block(base, status, error),
+    onConfig: (base, config) => { monitor.state.sites.find(site => site.base === base).config = config },
+  })
+  const monitor = createMonitorSession({ bases, access: harness.access, isHidden: () => false,
+    timers: { setInterval: () => 1, clearInterval() {} }, openSocket: () => ({ close() {} }) })
+  return { ...harness, monitor }
+}
+
+test('运行中开启验证：第一次数据 403 只重读本站配置一次，不带验证票，不重放失败请求', async () => {
+  let reads = 0
+  const { access, monitor, requests } = connectedFixture(request => {
+    const { origin, pathname } = new URL(request.url)
+    if (pathname === '/api/config') return Response.json(origin === primary && ++reads > 1
+      ? { ...publicSite, turnstile_enabled: true, turnstile_site_key: 'new-sitekey' } : publicSite)
+    return origin === primary ? Response.json({}, { status: 403 }) : Response.json({ servers: [], stats: { total: 0, online: 0, offline: 0 } })
+  }, [primary, secondary])
+  await monitor.navigate('#/')
+  const [blocked, unaffected] = monitor.state.sites
+  assert.equal(blocked.blocked, 403)
+  assert.equal(needsVerification(blocked.config), true)
+  assert.equal((await access.config(primary)).turnstile_site_key, 'new-sitekey')
+  assert.equal(unaffected.blocked, null)
+  const own = requests.filter(req => new URL(req.url).origin === primary)
+  assert.deepEqual(own.map(req => new URL(req.url).pathname), ['/api/config', '/api/servers', '/api/config'])
+  assert.equal(own.at(-1).headers.has('X-Turnstile-Token') || own.at(-1).headers.has('X-Turnstile-Verified'), false)
+  assert.equal(requests.filter(req => req.url === `${secondary}/api/config`).length, 1)
+  monitor.dispose()
+})
+
+for (const deniedAt of ['config', 'servers']) test(`首次 ${deniedAt} 被拒且无可用验证组件时，等手动重连后重新加载`, async () => {
+  let limited = true
+  const { monitor, requests } = connectedFixture(request => {
+    const path = new URL(request.url).pathname
+    if (limited && path === `/api/${deniedAt}`) return Response.json({ error: 'Forbidden' }, { status: 403 })
+    return Response.json(path === '/api/config' ? publicSite : { servers: [], stats: { total: 0, online: 0, offline: 0 } })
+  })
+  await monitor.navigate('#/')
+  const site = monitor.state.sites[0]
+  assert.equal(site.blocked, 403)
+  const paths = () => requests.map(req => new URL(req.url).pathname)
+  const before = deniedAt === 'config' ? ['/api/config'] : ['/api/config', '/api/servers', '/api/config']
+  assert.deepEqual(paths(), before)
+  await monitor.setVisible(false); await monitor.setVisible(true)
+  assert.deepEqual(paths(), before)
+  limited = false
+  await monitor.retry(primary)
+  assert.equal(site.blocked, null)
+  assert.deepEqual(paths(), [...before, '/api/config', '/api/servers'])
+  assert.ok(site.snapshotAt)
+  monitor.dispose()
+})
 
 test('私有站配置先决定登录，聚合次站不接管主页面，并发初始化不重复取配置', async () => {
   const { access, requests, navigations } = fixture(() => Response.json({ ...publicSite, is_public: false, turnstile_enabled: true }))
@@ -106,6 +187,36 @@ test('关闭验证后初始化、读、写都不发送遗留票据', async () =>
   await access.save(primary, { layout: 'compact' })
   assert.equal(requests.some(request => request.headers.has('X-Turnstile-Verified') || request.headers.has('X-Turnstile-Token')), false)
   assert.equal(storage.getItem(STORAGE.TURNSTILE_VERIFIED), null)
+})
+
+test('配套宿主只接收 Aether 的补丁，新的其他主题配置从写入响应带回', async () => {
+  const original = { aether: { layout: 'compact', unknown: true }, other: { color: 'red' } }
+  const updated = { aether: { layout: 'full', unknown: true }, other: { color: 'green' }, added: {} }
+  const { access, requests } = fixture(async request => {
+    if (request.method === 'GET') return Response.json({ ...publicSite, authorization: true, theme_options_patch: true, theme_options: original })
+    assert.deepEqual(await request.json(), { theme_options_patch: { namespace: 'aether', options: { layout: 'full' } } })
+    return Response.json({ success: true, theme_options: updated })
+  })
+  await access.config(primary)
+  await access.save(primary, { layout: 'full' })
+  assert.deepEqual((await access.config(primary)).theme_options, updated)
+  assert.equal(requests.length, 2)
+})
+
+test('旧宿主只在显式保存前重读其他主题；缺失有效快照时不写完整对象', async () => {
+  let options = { aether: { layout: 'compact' }, other: { color: 'red' } }
+  const { access, requests } = fixture(async request => {
+    if (request.method === 'GET') return Response.json({ ...publicSite, authorization: true, theme_options: options })
+    const body = await request.json()
+    assert.deepEqual(body, { theme_options: { aether: { layout: 'full', unknown: 1 }, other: { color: 'green' }, added: {} } })
+    return Response.json({ success: true, theme_options: body.theme_options })
+  })
+  await access.config(primary)
+  options = { aether: { layout: 'compact', unknown: 1 }, other: { color: 'green' }, added: {} }
+  await access.save(primary, { layout: 'full' })
+  options = null
+  await assert.rejects(access.save(primary, { layout: 'compact' }), /Invalid theme options/)
+  assert.deepEqual(requests.map(request => new URL(request.url).pathname), ['/api/config', '/api/config', '/api/theme_options', '/api/config'])
 })
 
 for (const status of [401, 403]) test(`迟到的 ${status} 保留新凭证，详情与实时连接不会被二次清空`, async () => {

@@ -13,7 +13,9 @@
 3. 在后端配置 `CORS_ALLOWED_ORIGINS`，加入主题页面的 origin。仅包含协议、主机与端口，不包含路径。
 4. 自己设置 CSP 时，允许 API origin 的 HTTPS/WSS 请求，以及国旗／系统图标所在的 API 源站。
 
-每个后端都要配置 CORS。跨域请求与 WebSocket 的凭据按后端隔离；在 Worker 后台登录，不会自动把 JWT 写入独立静态站的浏览器存储。**私有站点优先用同源安装**，让宿主处理登录和 Cookie；不要把 JWT 写进 URL、`.env` 或静态构建的 Secrets。独立静态托管适合公开站点。
+每个后端都要配置 CORS。**私有站点优先用同源安装**：在 Worker 后台登录后，独立静态站无法直接读取它的登录状态。不要把 JWT 写进 URL、`.env` 或构建配置。
+
+静态页首次访问要求登录的主站或节点详情时，会跳到对应 Worker 的 `/admin#/admin`。返回或刷新后，同一标签页不会为该 Worker 再次自动跳转；点击“在源站查看”可使用源站的登录状态继续查看。详情链接保留节点 ID，不转发多站参数或凭据。
 
 开发时设置 `API_BASE` 会读取配置中的真实后端并关闭本地示例。浏览器直接请求该后端，需要允许本地 origin `http://127.0.0.1:5175`。不要在 `API_BASE` 中放 JWT、密码或其他凭据。
 
@@ -21,11 +23,11 @@
 
 每个站点首次读 `/api/config`，首页读一次 `/api/servers`，此后的实时更新来自 WebSocket，没有定时 REST 轮询。页面隐藏时关闭连接并保留读数；恢复可见时按当前页面补一次快照。达到站点设置的实时连接时限后，须手动继续。
 
-配套的 Versior Worker 也在 `/api/server.sysConfig` 返回这四个显示开关，允许冷打开详情直接使用；旧版接口缺失时主题不会猜测开关。
+首次在线数取自该 Worker 返回的统计。之后用同一站的时间判断五分钟离线和重新上线；若旧宿主没有提供可用的服务端时钟，保留最后的统计，避免因访客电脑时钟偏差而误判。
 
 首页打开详情弹窗复用列表连接。直接打开某个节点的详情只读取该节点与 `/api/history/all`，并只订阅该节点。详情默认显示最近 10 分钟；可切换为 30 分钟或 1、6、12、24、48、96、168 小时，未登录最多 24 小时。切换时只读历史；延迟与丢包曲线共用这份数据。
 
-原版宿主的详情响应可能只有 `long_history_points`，没有 `show_price`、`show_expire`、`show_tf` 或 `show_three_net_details`。冷启动无法确认开关时只展示基础资源，不为了猜开关额外读取全站列表。如需被隐藏的网络、流量或账单面板，先进入首页取得本站开关，再打开详情。
+Versior 配套 Worker 的单节点响应在 `sysConfig` 中返回 `show_price`、`show_expire`、`show_tf` 和 `show_three_net_details`；原版宿主的详情响应可能只有 `long_history_points`。冷启动无法确认开关时只展示基础资源，不为了猜开关额外读取全站列表。如需被隐藏的网络、流量或账单面板，先进入首页取得本站开关，再打开详情。
 
 ## 主题选项
 
@@ -64,6 +66,8 @@
 页头的“主题设置”提供项目背景与纯色背景两个可见选项，并可调整透明度、模糊、配色、卡片信息和地球动效。项目背景兼容宿主桌面背景及手机 `body::after` 背景；纯色背景关闭图片与环境光效果，底色跟随深浅色。文字保持不透明。
 
 浏览器把个人覆盖保存在 `orbit-preferences`；未覆盖的选项跟随服务端默认，旧 `theme_options.orbit` 仍可读取。普通调整只影响本机。“恢复站点默认”只清除个人覆盖；已登录管理员可显式选择“保存为站点默认”，通过 `POST /api/theme_options` 更新 `theme_options.aether`，保留其他主题选项，多站点只写第一站。成功后清除本机覆盖；失败显示错误。
+
+配套 Worker 在 `/api/config` 声明 `theme_options_patch: true` 时，Aether 仅提交自己的选项，数据库原子合并，其他主题同时修改的设置也会保留。在没有这项能力的原版或旧版 Worker 上，点击“保存为站点默认”会额外读取一次 `/api/config`，再合并并提交完整对象。旧接口无法原子合并，多个管理员请错开保存。
 
 HTML 在主脚本加载前恢复保存的配色与首屏底色，页面组件在首次渲染时使用同一份个人偏好，无需等待配置接口。跟随系统模式继续响应系统配色变化。
 
@@ -113,6 +117,8 @@ assets/
 启用 Actions，并允许该工作流写仓库内容（`contents: write`；**Settings → Actions → General → Workflow permissions**）。首次生成分支后，在 **Settings → Pages → Deploy from a branch** 选择 **`dist` / `(root)`**。默认 `GITHUB_TOKEN` 能更新 `dist` 和 `build`；按 [GitHub 的分支发布规则](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)，它推送的提交不会触发 Pages 重建。需要让每次推送也发布 Pages 时，可为该仓库配置单独的 `PAGES_PUBLISH_TOKEN`（限当前仓库、Contents: write，其账号须有 Pages 发布资格）。这是 Git 凭据，仅作 Actions secret，**不属于静态构建参数**。分支保护应允许所选发布身份更新这两个分支。
 
 本地使用 `npm ci && npm test && npm run package` 验证并生成 ZIP、SHA-256；不修改线上站点。`npm test` 包含本地 bare Git 回归，实际构建两种配置并验证分支历史、提交说明和重跑行为。
+
+构建和测试使用只读仓库权限。独立的发布任务按本次构建的 artifact ID 下载两个页面，再用写凭据推送，无需运行 npm。即使 `main` 在构建期间前移，也会记录已完成的版本；如果新版本已先发布，晚到的旧产物会保留在分支历史中，页面继续使用新版本。
 
 ## 常见问题
 

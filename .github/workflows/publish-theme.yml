@@ -4,19 +4,21 @@ on:
     branches: [main]
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: publish-theme
   cancel-in-progress: false
+  queue: max
 jobs:
-  publish:
+  build:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-          token: ${{ secrets.PAGES_PUBLISH_TOKEN || github.token }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -30,7 +32,7 @@ jobs:
           BACKGROUND_IMAGE: ''
           CSP_API: ''
           CSP_STATIC: ''
-        run: npm run build -- --outDir "$RUNNER_TEMP/install"
+        run: npm run build -- --outDir "$RUNNER_TEMP/theme-bundle/install"
       - name: Build Pages site
         env:
           API_BASE: ${{ secrets.API_BASE }}
@@ -38,6 +40,31 @@ jobs:
           BACKGROUND_IMAGE: ${{ secrets.BACKGROUND_IMAGE }}
           CSP_API: ${{ secrets.CSP_API }}
           CSP_STATIC: ${{ secrets.CSP_STATIC }}
-        run: npm run build -- --outDir "$RUNNER_TEMP/pages"
+        run: npm run build -- --outDir "$RUNNER_TEMP/theme-bundle/pages"
+      - id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/theme-bundle/
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/theme-bundle
       - name: Append both artifacts to their own histories
-        run: bash scripts/publish-theme.sh "$RUNNER_TEMP/pages" "$RUNNER_TEMP/install"
+        env:
+          GH_TOKEN: ${{ secrets.PAGES_PUBLISH_TOKEN || github.token }}
+        run: |
+          git config --local credential.https://github.com.helper '!gh auth git-credential'
+          bash scripts/publish-theme.sh "$RUNNER_TEMP/theme-bundle/pages" "$RUNNER_TEMP/theme-bundle/install"

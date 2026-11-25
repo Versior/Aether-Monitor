@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { flag, regionName, routes, hasIp, issues, hasProbeReading, activeProbes, probeValue, latencyClass, historyChartRows, timestamp, uptime, percent, capacity, dateTime, speed, number, price, expiry, bytes, quota, trafficBytes, trafficPercent, trafficNames } from './data.js'
 import { t } from './i18n.js'
+import { adminUrl } from './siteAccess.js'
 import { dialogKey } from './dialogKey.js'
 import SiteStatus from './SiteStatus.vue'
 import MetricChart from './MetricChart.vue'
@@ -18,15 +19,17 @@ const start = computed(() => props.detail.end-props.detail.hours*3600000)
 const hours = computed(() => [0.167,0.5,1,6,12,24,...(props.site.config?.authorization ? [48,96,168]:[])])
 const probes = computed(() => node.value ? activeProbes([node.value], props.settings) : [])
 const colors = ['#8fb6f0','#b79cd6','#74d9b3','#eac080','#72c5d9','#dd98af','#a5b67f','#bbbfe0']
-const series = (field) => activeProbes([], props.settings, props.detail.rows, field).map((p,i) => ({key:`${field}_${p.key}`, name:p.name, color:colors[i]}))
+const charts = computed(() => ['ping','loss'].map(field => ({
+  field, series: activeProbes([], props.settings, props.detail.rows, field).map((probe,i) => ({key:`${field}_${probe.key}`, name:probe.name, color:colors[i]})),
+})).filter(chart => chart.series.length))
 const hasDisk = computed(() => rows.value.some(row=>row.disk))
 const activeTime = computed(() => props.online ? props.now : timestamp(node.value?.last_updated))
 onMounted(() => nextTick(() => dialog.value?.focus()))
 </script>
 <template>
   <div class="dialog-backdrop" @click.self="emit('close')"><section ref="dialog" class="detail-dialog" :class="{'network-detail':tab==='网络','resource-detail':tab==='资源'}" role="dialog" aria-modal="true" :aria-label="t('节点详情')" tabindex="-1" @keydown="dialogKey($event, () => emit('close'))">
-    <div class="detail-top"><h2><img v-if="node && flag(node.region,site.base)" :src="flag(node.region,site.base)" class="table-flag" alt=""> {{ node?.name || t('节点详情') }}</h2><button class="icon-button" :aria-label="t('关闭详情')" @click="emit('close')"><UiIcon name="close"/></button></div>
-    <SiteStatus :site="site" :light="light" :access="access" @retry="base=>emit('retry',base)" @verified="(base,config)=>emit('verified',base,config)"/>
+    <div class="detail-top"><h2><img v-if="node && flag(node.region,site.base)" :src="flag(node.region,site.base)" class="table-flag" alt=""> {{ node?.name || t('节点详情') }}</h2><div class="detail-actions"><a :href="adminUrl(site.base)" class="icon-button" :title="t('管理后台')" :aria-label="t('管理后台')"><UiIcon name="settings"/></a><button class="icon-button" :aria-label="t('关闭详情')" @click="emit('close')"><UiIcon name="close"/></button></div></div>
+    <SiteStatus :site="site" :detail-id="detail.id" :light="light" :access="access" @retry="base=>emit('retry',base)" @verified="(base,config)=>emit('verified',base,config)"/>
     <p v-if="!node && detail.loading" role="status">{{ t('正在读取服务器数据') }}</p>
     <p v-if="detail.error && detail.error!==site.error && !site.blocked" class="error-state" role="status">{{ t(detail.error) }} <button class="clear-button" @click="emit('retry',site.base)">{{ t('重试') }}</button></p>
     <template v-if="node">
@@ -46,7 +49,7 @@ onMounted(() => nextTick(() => dialog.value?.focus()))
       <div v-if="tab==='资产'" class="detail-stats"><div v-if="show.price"><span>{{ t('价格 / 账单周期') }}</span><strong>{{ price(node) }}</strong></div><div v-if="show.expire"><span>{{ t('到期日期') }}</span><strong>{{ node.expire_date || t('未填写') }}</strong><small>{{ expiry(node,now) }}</small><small v-if="node.auto_renewal==='1'">{{ t('启用到期日自动推进') }}</small></div><template v-if="show.traffic"><div><span>{{ t('本月已用 / 额度') }} · {{ t(trafficNames[node.traffic_calc_type||'total']) }}</span><strong>{{ bytes(trafficBytes(node)) }} / {{ quota(node) }}</strong><small class="asset-traffic"><UiIcon name="down"/>{{ bytes(node.net_rx_monthly) }} · <UiIcon name="up"/>{{ bytes(node.net_tx_monthly) }} {{ trafficPercent(node)===null?'':' · '+trafficPercent(node)+'%' }}</small></div><div><span>{{ t('月流量重置日') }}</span><strong>{{ node.reset_day?t('每月 {day} 日',{day:node.reset_day}):t('未填写') }}</strong></div></template></div>
       <div v-if="tab!=='资产'" class="detail-chart"><div class="chart-heading"><strong>{{ t('历史趋势') }}</strong><select :value="detail.hours" :aria-label="t('历史时间范围')" @change="emit('hours',Number($event.target.value))"><option v-for="h in hours" :key="h" :value="h">{{ h<1?t('{n} 分钟',{n:h===0.167?10:30}):t('{n} 小时',{n:h}) }}</option></select></div><p v-if="detail.loading" class="empty-chart">{{ t('正在加载历史…') }}</p>
         <div v-else-if="!detail.error" class="detail-chart-grid"><MetricChart v-if="tab==='概览'" :rows="rows" :start="start" :end="detail.end" :series="[{key:'cpu',name:'CPU',color:'#8fb6f0'},{key:'ram_percent',name:t('内存'),color:'#74d9b3'}]" :ceiling="100" unit="%"/>
-          <template v-if="tab==='网络'"><MetricChart v-for="field in ['ping','loss'].filter(f=>series(f).length)" :key="field" :rows="rows" :start="start" :end="detail.end" :series="series(field)" :ceiling="field==='loss'?100:undefined" :unit="field==='loss'?'%':'ms'"/><MetricChart :rows="rows" :start="start" :end="detail.end" :series="[{key:'net_down',name:t('下行'),color:'#8fb6f0'},{key:'net_up',name:t('上行'),color:'#74d9b3'}]" unit="MB/s"/></template>
+          <template v-if="tab==='网络'"><MetricChart v-for="{field,series} in charts" :key="field" :rows="rows" :start="start" :end="detail.end" :series="series" :ceiling="field==='loss'?100:undefined" :unit="field==='loss'?'%':'ms'"/><MetricChart :rows="rows" :start="start" :end="detail.end" :series="[{key:'net_down',name:t('下行'),color:'#8fb6f0'},{key:'net_up',name:t('上行'),color:'#74d9b3'}]" unit="MB/s"/></template>
           <template v-if="tab==='资源'"><MetricChart :rows="rows" :start="start" :end="detail.end" :series="[{key:'ram_percent',name:t('内存'),color:'#74d9b3'},{key:'swap_percent',name:'Swap',color:'#b79cd6'}]" :ceiling="100" unit="%"/><MetricChart v-if="hasDisk" :rows="rows" :start="start" :end="detail.end" :series="[{key:'disk_read_iops',name:t('读 IOPS'),color:'#8fb6f0'},{key:'disk_write_iops',name:t('写 IOPS'),color:'#eac080'}]" unit="IOPS"/></template>
         </div></div>
     </template>

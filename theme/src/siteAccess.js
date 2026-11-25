@@ -3,9 +3,14 @@ import { STORAGE } from '../../src/frontend/utils/constants.js'
 import { requestJson } from '../../src/frontend/utils/http.js'
 
 export const adminUrl = base => new URL(ADMIN_ENTRY_URL, base).href
+export function sourceViewUrl(base, detailId, origin = window.location.origin) {
+  const worker = new URL(base).origin
+  return worker === origin ? '' : `${worker}/#/${detailId ? `server/${encodeURIComponent(detailId)}` : ''}`
+}
 export const needsVerification = config => config?.turnstile_enabled === true && !config.verified && !config.verificationPending && (config.is_public || config.authorization)
+export const hasVerificationWidget = config => config?.turnstile_enabled === true && !!config.turnstile_site_key
 
-export function createSiteAccess({ fetch: fetcher = globalThis.fetch, origin = window.location.origin, storage = window.localStorage,
+export function createSiteAccess({ fetch: fetcher = globalThis.fetch, origin = window.location.origin, storage = window.localStorage, tabStorage = globalThis.sessionStorage,
   navigate = url => window.location.assign(url), shouldRedirect = base => base === origin, onConfig, onBlocked } = {}) {
   const configs = new Map()
   const pending = new Map()
@@ -16,12 +21,24 @@ export function createSiteAccess({ fetch: fetcher = globalThis.fetch, origin = w
   const receiptKey = base => key(base, STORAGE.TURNSTILE_VERIFIED)
 
   function redirect(base) {
-    if (!redirected.has(base) && shouldRedirect(base)) { redirected.add(base); navigate(adminUrl(base)) }
+    if (redirected.has(base) || !shouldRedirect(base)) return
+    const worker = new URL(base).origin
+    if (worker !== origin) {
+      const key = `aether:login-visited:${worker}`
+      if (tabStorage?.getItem(key)) return
+      tabStorage?.setItem(key, '1')
+    }
+    redirected.add(base)
+    navigate(adminUrl(base))
   }
   function publish(base, value) {
     configs.set(base, value)
     onConfig?.(base, value)
     return value
+  }
+  function invalidateConfig(base) {
+    configs.delete(base)
+    onConfig?.(base, null)
   }
   async function request(base, path, options = {}) {
     const token = wsToken(base)
@@ -45,8 +62,15 @@ export function createSiteAccess({ fetch: fetcher = globalThis.fetch, origin = w
       }
       if (error.status === 403) {
         storage.removeItem(receiptKey(base))
-        if (configs.has(base)) publish(base, { ...configs.get(base), verified: false, verificationPending: false })
+        const cached = configs.get(base)
+        const mustReadSettings = path !== '/api/config' && !hasVerificationWidget(cached)
+        if (mustReadSettings) invalidateConfig(base)
+        else if (cached) publish(base, { ...cached, verified: false, verificationPending: false })
         onBlocked?.(base, 403, error)
+        if (mustReadSettings) {
+          const fresh = await config(base)
+          if (fresh.is_public === false && !fresh.authorization) onBlocked?.(base, 401)
+        }
       }
       throw error
     }
@@ -82,15 +106,23 @@ export function createSiteAccess({ fetch: fetcher = globalThis.fetch, origin = w
     return result
   }
   async function save(base, preferences) {
-    const current = await config(base)
+    const bootstrapped = configs.has(base)
+    let current = await config(base)
     const path = '/api/theme_options'
+    if (bootstrapped && current.authorization === true && current.theme_options_patch !== true) current = await authorizedRequest(base, '/api/config')
     if (current.authorization !== true) throw Object.assign(new Error('Unauthorized'), { status: 401, base, path, loginUrl: adminUrl(base) })
     if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) throw new TypeError('Invalid theme preferences')
-    const options = current.theme_options || {}
-    const body = { theme_options: { ...options, aether: { ...options.aether, ...preferences } } }
+    let body
+    if (current.theme_options_patch === true) {
+      body = { theme_options_patch: { namespace: 'aether', options: preferences } }
+    } else {
+      const options = current.theme_options
+      if (!options || typeof options !== 'object' || Array.isArray(options)) throw new Error('Invalid theme options response')
+      body = { theme_options: { ...options, aether: { ...options.aether, ...preferences } } }
+    }
     const result = await authorizedRequest(base, path, { body })
     if (result?.success !== true || !result.theme_options || typeof result.theme_options !== 'object' || Array.isArray(result.theme_options)) throw new Error('Invalid theme options response')
     return publish(base, { ...configs.get(base), theme_options: result.theme_options })
   }
-  return { config, wsToken, verify, get: (base, path) => authorizedRequest(base, path), save }
+  return { config, invalidateConfig, wsToken, verify, get: authorizedRequest, save }
 }

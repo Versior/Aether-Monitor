@@ -1,4 +1,5 @@
 export default {
+  '在源站查看': 'View on source site',
   '站点访问验证': 'Site verification',
   '验证后查看服务器': 'Verify to view servers',
   '完成站点的人机验证后，数据会自动加载。': 'Complete the verification to load server data.',

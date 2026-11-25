@@ -38,7 +38,7 @@ function dashboard({hash='#/', failing=false, saved={}}={}) {
   })
   const run=s=>vm.runInContext(s,ctx); run(setup)
   return { run, page, requests, async mount(){for(const f of listeners)await f(); await run('session.navigate(window.location.hash)');await nextTick()},
-    async render(pattern,bindings){const html=source.match(pattern)[0];const app=createSSRApp({setup:()=>run('({'+bindings+'})'),render:compile(html)});return renderToString(app)} }
+    async render(pattern,bindings,components={}){const html=source.match(pattern)[0];const app=createSSRApp({components,setup:()=>run('({'+bindings+'})'),render:compile(html)});return renderToString(app)} }
 }
 
 test('首页采用宿主标题图标、语言和权威统计；同 ID 节点的显示开关按站区分', async()=>{
@@ -55,4 +55,11 @@ test('打开第二站节点直链，后台指向该 Worker，保留隐藏价格�
 test('接口返回 HTML 500 时错误保留接口与 Ray ID；无 stats 或畸形 hash 不影响页面渲染',async()=>{
   const a=dashboard({failing:true});await a.mount();assert.match(a.run('state.error'),/\/api\/servers.*500.*local-test-ray/);assert.equal(a.run('statusTabs.value[0].count'),'—')
   const b=dashboard({hash:'#/server/%FF%'});await b.mount();assert.equal(b.run('state.error'),'节点链接格式无效');assert.equal(b.requests.length,0)
+})
+
+test('详情挂载时首页不再创建重复验证入口，关闭后各站恢复自己的入口', async()=>{
+  const a=dashboard({hash:'#/server/shared?site=1'});await a.mount()
+  const panels=()=>a.render(/<SiteStatus v-for=[\s\S]*?\/>/, 'statusSites,bases,access,light,session', {SiteStatus:{props:['site'],render(){return h('span',this.site.base)}}})
+  assert.doesNotMatch(await panels(),/example\.invalid/)
+  await a.run("session.navigate('#/')");assert.match(await panels(),/first\.example\.invalid/);assert.match(await panels(),/second\.example\.invalid/)
 })

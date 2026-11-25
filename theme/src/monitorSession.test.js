@@ -41,7 +41,7 @@ test('每站只取一次配置和列表；总数服从 REST stats，热详情复
   assert.notEqual(app.state.nodes[0].key, app.state.nodes[1].key)
   assert.deepEqual(app.sockets.map(socket => [socket.index, socket.ids, socket.handlers.getToken()]), [[0, ['same'], 'one'], [1, ['same'], 'two']])
   assert.equal(app.detailHash(app.state.nodes[1]), '#/server/same?site=1')
-  app.tick(65)
+  app.tick(130)
   assert.equal(app.requests.length, 4)
   await app.navigate(app.detailHash(app.state.nodes[1]))
   assert.equal(app.state.detail.node.source, second)
@@ -150,6 +150,22 @@ test('未登录或尚待验证不请求资源，有缓存票据则先走真实 R
   } })
   await app.navigate('#/'); await app.navigate('#/server/gone')
   assert.equal(app.state.detail.node, null); assert.equal(app.state.nodes.length, 0); assert.equal(app.state.detail.error, 'removed')
+})
+
+test('切换历史范围时节点被隐藏，立即清理旧节点、样本及订阅，返回首页只订阅可见节点', async () => {
+  let visits = 0
+  const app = harness({ get(base, path, url) {
+    if (url.pathname === '/api/servers') return list((++visits === 1 ? ['stay', 'removed'] : ['stay']).map(id => ({id})))
+    if (url.pathname === '/api/server') return {id:'removed', cpu:32}
+    if (url.searchParams.get('hours') === '6') throw Object.assign(new Error('Node no longer visible'), {status:404})
+    return [{timestamp:start,cpu:32}]
+  } })
+  await app.navigate('#/'); await app.navigate('#/server/removed'); assert.equal(app.state.detail.rows.length,1)
+  await app.setHours(6)
+  assert.equal(app.state.detail.node,null); assert.deepEqual(app.state.detail.rows,[])
+  assert.deepEqual(app.state.nodes.map(node=>node.id),['stay']); assert.equal(app.state.detail.error,'Node no longer visible')
+  assert.equal(app.sockets[0].closed,true)
+  await app.navigate('#/');assert.deepEqual(app.sockets.at(-1).ids,['stay'])
 })
 
 test('范围切换只接受当前请求，离开详情后旧响应不会打开错误节点', async () => {
