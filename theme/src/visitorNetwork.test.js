@@ -36,7 +36,7 @@ test('重新检测读取当前出口 IP，失败时清除旧风险报告并恢�
   let address = '203.0.113.71'
   let failed = false
   const sandbox = vm.createContext({
-    computed, ref, watch, onUnmounted() {}, AbortController, t:(s,p)=>p?s.replace('{status}',p.status):s, locale:ref('zh-CN'), defineEmits: () => () => {},
+    computed, ref, watch, onMounted() {}, onUnmounted() {}, AbortController, t:(s,p)=>p?s.replace('{status}',p.status):s, locale:ref('zh-CN'), defineEmits: () => () => {},
     navigator: { userAgent: 'Chrome/130.0' }, getApiBases: () => ['https://monitor.example.com'],
     browserInfo, maskIp, normalizeIpReport, parseTrace, URL, AbortSignal,
     fetch: async url => {
@@ -63,12 +63,12 @@ test('重新检测读取当前出口 IP，失败时清除旧风险报告并恢�
   assert.match(vm.runInContext('error.value', sandbox), /503/)
 })
 
-test('首次展开自动检测一次，收起再展开不重复，仍可手动重试', async () => {
+test('挂载后自动检测一次，收起再展开不重复，仍可手动重试', async () => {
   const urls = []
   let failed = false
   const sandbox = vm.createContext({
     computed, ref, watch, t: (s, p) => p ? s.replace('{status}', p.status) : s, locale: ref('zh-CN'),
-    onUnmounted() {}, defineEmits: () => () => {}, navigator: { userAgent: 'Firefox/100' },
+    onMounted: callback => { sandbox.mounted = callback }, onUnmounted() {}, defineEmits: () => () => {}, navigator: { userAgent: 'Firefox/100' },
     getApiBases: () => ['https://example.invalid'], browserInfo, maskIp, normalizeIpReport, parseTrace, URL,
     AbortController, AbortSignal,
     fetch: async url => {
@@ -80,7 +80,7 @@ test('首次展开自动检测一次，收起再展开不重复，仍可手动�
   })
   const script = readFileSync(new URL('./VisitorNetwork.vue', import.meta.url), 'utf8').match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('import.meta.env.AETHER_DEMO', 'false')
   vm.runInContext(script, sandbox)
-  vm.runInContext('open.value=true', sandbox)
+  await vm.runInContext('mounted()', sandbox)
   await new Promise(resolve => setImmediate(resolve))
   assert.deepEqual(urls, ['https://example.invalid/cdn-cgi/trace', 'https://api.ipquery.io/203.0.113.71'])
   vm.runInContext('open.value=false', sandbox); vm.runInContext('open.value=true', sandbox)

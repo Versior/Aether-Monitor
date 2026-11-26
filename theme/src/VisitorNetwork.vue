@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { getApiBases } from '../../src/frontend/utils/config.js'
 import { flag, regionName } from './data.js'
 import { t, locale } from './i18n.js'
@@ -37,9 +37,7 @@ async function inspect() {
   } catch (cause) { if (!controller.signal.aborted) error.value=t(cause.message) }
   finally { loading.value=false }
 }
-watch(open, value => {
-  if (value && !inspected) inspect()
-})
+onMounted(inspect)
 onUnmounted(()=>controller?.abort())
 </script>
 <template>

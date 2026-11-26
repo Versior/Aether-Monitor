@@ -118,7 +118,7 @@ https://github.com/Versior/Aether-Monitor/tree/build
 
 ## 访客 IP 与隐私
 
-打开页面不会查询外部服务。访客第一次展开底部面板时自动检测一次；收起再展开不会重复检测，面板内仍可手动重试。浏览器先读取宿主的 `/cdn-cgi/trace`，再将出口 IP 发给 [IPQuery](https://ipquery.io/) 查询归属与风险。结果只保存在页面内存中，默认脱敏。严格限制监控接口的站点，请将 `theme_options.aether.visitorLookup` 设为 `false`，隐藏检测入口；`visitorFlow` 只控制动画。
+页面加载后会自动检测一次，底部条直接显示检测状态和结果；展开面板只查看详细信息，收起再展开不会重复检测，面板内仍可手动重试。浏览器先读取宿主的 `/cdn-cgi/trace`，再将出口 IP 发给 [IPQuery](https://ipquery.io/) 查询归属与风险。结果只保存在页面内存中，默认脱敏。严格限制监控接口的站点，请将 `theme_options.aether.visitorLookup` 设为 `false`，隐藏检测入口；`visitorFlow` 只控制动画。
 
 风险分直接采用来源的 `risk_score`，不换算成“纯净百分比”。查询失败、缺失评分、代理／VPN／Tor 标记分别展示，不代表特定平台的信誉或解锁保证。
 

@@ -63,7 +63,7 @@ The updated companion detector also recognizes CTGNET, CUG, CMIN2 and common int
 
 ## Visitor privacy
 
-No visitor lookup runs on page load. The first time a visitor expands the panel, one lookup starts automatically; collapsing and expanding again does not repeat it, and the panel still offers a manual retry. The browser reads the host's Cloudflare trace and sends its exit IP to [IPQuery](https://ipquery.io/) to obtain metadata and risk flags. Results stay in page memory and addresses are masked by default. To enable the optional check, allow `https://api.ipquery.io` in `connect-src`. To restrict the site to monitor APIs, set `theme_options.aether.visitorLookup` to `false`; this removes the button. `visitorFlow` only controls animation.
+One lookup starts automatically after the page loads; the bottom strip shows its status and result, while expanding the panel reveals details. Collapsing and expanding again does not repeat it, and the panel still offers a manual retry. The browser reads the host's Cloudflare trace and sends its exit IP to [IPQuery](https://ipquery.io/) to obtain metadata and risk flags. Results stay in page memory and addresses are masked by default. To enable the optional check, allow `https://api.ipquery.io` in `connect-src`. To restrict the site to monitor APIs, set `theme_options.aether.visitorLookup` to `false`; this removes the button. `visitorFlow` only controls animation.
 
 Risk scores are shown as provided, without converting them into a fabricated purity percentage. Failed and incomplete checks remain explicit. The local demo uses the reserved documentation address `203.0.113.71` and does not inspect the real visitor IP.
 
