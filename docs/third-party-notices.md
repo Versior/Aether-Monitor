@@ -24,6 +24,6 @@
 
 ## 依赖与外部服务
 
-Vue、Vite、ws 保留其 npm 包中的许可。[IPQuery](https://ipquery.io/) 是可选的浏览器查询服务，不是随主题分发的数据集。进入页面或展开面板时不会发起检测；访客阅读说明并主动点击后，浏览器才尝试读取宿主的 Cloudflare trace，再向 IPQuery 发送出口 IP。风险分与网络归属由 IPQuery 提供。站点可设置 `theme_options.aether.visitorLookup: false` 禁用此入口；本地虚构示例不向 IPQuery 发请求。
+Vue、Vite、ws 保留其 npm 包中的许可。[IPQuery](https://ipquery.io/) 是可选的浏览器查询服务，不是随主题分发的数据集。进入页面时不会发起检测；访客第一次展开面板时自动检测一次，之后可手动重试。浏览器先尝试读取宿主的 Cloudflare trace，再向 IPQuery 发送出口 IP。风险分与网络归属由 IPQuery 提供。站点可设置 `theme_options.aether.visitorLookup: false` 禁用此入口；本地虚构示例不向 IPQuery 发请求。
 
 文档中的截图均使用虚构演示节点，Aether 标志为本项目绘制的 SVG。

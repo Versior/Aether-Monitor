@@ -11,6 +11,7 @@ const emit = defineEmits(['country'])
 const browser = browserInfo(navigator.userAgent)
 const trace = ref({}), report = ref(null), open = ref(false), revealed = ref(false)
 const loading = ref(false), error = ref(''), checkedAt = ref(null)
+let inspected = false
 const ip = computed(() => report.value?.ip || trace.value.ip || '')
 const countryCode = computed(() => report.value?.countryCode || trace.value.loc || '')
 const location = computed(() => countryCode.value ? [regionName(countryCode.value),report.value?.city].filter(s=>s && s!=='未提供').join(' · ') : t('地区未获取'))
@@ -19,6 +20,7 @@ watch(countryCode, country => emit('country', country), { immediate: true })
 let controller
 async function inspect() {
   if (loading.value) return
+  inspected = true
   loading.value=true; error.value=''; report.value=null; trace.value={}; checkedAt.value=null; revealed.value=false
   controller = new AbortController()
   const signal=AbortSignal.any([controller.signal,AbortSignal.timeout(10000)])
@@ -35,6 +37,9 @@ async function inspect() {
   } catch (cause) { if (!controller.signal.aborted) error.value=t(cause.message) }
   finally { loading.value=false }
 }
+watch(open, value => {
+  if (value && !inspected) inspect()
+})
 onUnmounted(()=>controller?.abort())
 </script>
 <template>

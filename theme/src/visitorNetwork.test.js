@@ -63,9 +63,31 @@ test('重新检测读取当前出口 IP，失败时清除旧风险报告并恢�
   assert.match(vm.runInContext('error.value', sandbox), /503/)
 })
 
-test('挂载及展开访客面板不触发出口或 IPQuery 请求', async () => {
-  let calls=0; const mounted=[]
-  const sandbox=vm.createContext({computed,ref,watch, t:s=>s, locale:ref('zh-CN'), onMounted:f=>mounted.push(f),onUnmounted(){},defineEmits:()=>()=>{},navigator:{userAgent:'Firefox/100'},getApiBases:()=>['https://example.invalid'],browserInfo,maskIp,normalizeIpReport,parseTrace, URL,AbortController,AbortSignal,fetch:async()=>{calls++;throw Error('Unexpected egress')}})
-  const script=readFileSync(new URL('./VisitorNetwork.vue',import.meta.url),'utf8').match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm,'').replace('import.meta.env.AETHER_DEMO','false'); vm.runInContext(script,sandbox)
-  await Promise.all(mounted.map(f=>f())); vm.runInContext('open.value=true',sandbox); assert.equal(calls,0)
+test('首次展开自动检测一次，收起再展开不重复，仍可手动重试', async () => {
+  const urls = []
+  let failed = false
+  const sandbox = vm.createContext({
+    computed, ref, watch, t: (s, p) => p ? s.replace('{status}', p.status) : s, locale: ref('zh-CN'),
+    onUnmounted() {}, defineEmits: () => () => {}, navigator: { userAgent: 'Firefox/100' },
+    getApiBases: () => ['https://example.invalid'], browserInfo, maskIp, normalizeIpReport, parseTrace, URL,
+    AbortController, AbortSignal,
+    fetch: async url => {
+      urls.push(String(url))
+      if (String(url).endsWith('/cdn-cgi/trace')) return { ok: true, text: async () => 'ip=203.0.113.71\nloc=JP\n' }
+      if (failed) return { ok: false, status: 503, json: async () => ({}) }
+      return { ok: true, json: async () => ({ ip: '203.0.113.71', risk: { risk_score: 0 } }) }
+    },
+  })
+  const script = readFileSync(new URL('./VisitorNetwork.vue', import.meta.url), 'utf8').match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '').replace('import.meta.env.AETHER_DEMO', 'false')
+  vm.runInContext(script, sandbox)
+  vm.runInContext('open.value=true', sandbox)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(urls, ['https://example.invalid/cdn-cgi/trace', 'https://api.ipquery.io/203.0.113.71'])
+  vm.runInContext('open.value=false', sandbox); vm.runInContext('open.value=true', sandbox)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(urls.length, 2)
+  failed = true
+  await vm.runInContext('inspect()', sandbox)
+  assert.equal(urls.length, 4)
+  assert.match(vm.runInContext('error.value', sandbox), /503/)
 })

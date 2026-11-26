@@ -75,7 +75,7 @@ HTML 在主脚本加载前恢复保存的配色与首屏底色，页面组件在
 
 ## 访客网络
 
-打开页面或展开面板不会读取 trace，也不会联系 IPQuery。访客在隐私提示下主动点击检测后，浏览器才尝试访问第一站的 `/cdn-cgi/trace`，再向 `https://api.ipquery.io` 查询出口 IP 的归属与风险。若 trace 不能提供地址，会在同一次授权检测中向 IPQuery 读取出口 IP。结果仅存在本页内存，默认脱敏；外部服务仍会收到真实出口地址。
+打开页面不会读取 trace，也不会联系 IPQuery。访客第一次展开底部面板时自动检测一次；收起再展开不会重复请求，检测失败后可在面板中手动重试。浏览器先尝试访问第一站的 `/cdn-cgi/trace`，再向 `https://api.ipquery.io` 查询出口 IP 的归属与风险。若 trace 不能提供地址，会在同一次检测中向 IPQuery 读取出口 IP。结果仅存在本页内存，默认脱敏；外部服务仍会收到真实出口地址。
 
 需要这个功能时，在宿主 **后台 → 外观设置 → CSP API 域名白名单** 加入 `https://api.ipquery.io`；独立静态托管可将其写入 `CSP_API`。严格限定监控 API 时，把**站点默认** `theme_options.aether.visitorLookup` 设为 `false`：即使浏览器有旧的 `true`，也不提供入口。`visitorFlow` 只控制动画。国旗／系统图标来自节点所属 API 源站，独立静态服务的 `img-src` 需允许这些源站。
 
